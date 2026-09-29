@@ -11,7 +11,6 @@ import {
   saveProgress, todayLessons,
 } from './progress.js';
 import { createPoseLandmarker, drawPose, evaluatePose, frameStatus, HOLD_MS } from './pose.js';
-import { Mascot } from './Mascot.jsx';
 import { resetSpeech, speakRu } from './speech.js';
 import './styles.css';
 
@@ -43,6 +42,23 @@ function formatTime(ms) {
   const minutes = Math.floor(total / 60);
   const seconds = total % 60;
   return `${minutes}:${String(seconds).padStart(2, '0')}`;
+}
+
+const EXERCISE_VIDEOS = {
+  greeting: '/videos/greeting.mp4',
+  'left-arm': '/videos/raise-left.mp4',
+  'right-arm': '/videos/raise-right.mp4',
+  'both-arms': '/videos/both-hands.mp4',
+  success: '/videos/celebrate.mp4',
+  retry: '/videos/try-again.mp4',
+};
+
+function ExerciseVideo({ src }) {
+  return (
+    <div className="exercise-video-wrap" aria-label="Демонстрация движения от Мово">
+      <video key={src} className="exercise-video" src={src} autoPlay muted loop playsInline />
+    </div>
+  );
 }
 
 function App() {
@@ -838,7 +854,13 @@ function LessonScreen({ faculty, lesson, onBack, onFinish }) {
         ? 'Сначала левая, потом правая, потом обе.'
         : 'Посмотри на Мово и повторяй движения в своём темпе.';
   const showHint = Boolean(stableHint) && !praising && phase === 'practice' && !(mode === 'sequence' && seqStage !== 'play');
-  const [mascotState, setMascotState] = useState('idle');
+  const demoVideo = phase === 'prep'
+    ? (mode === 'boss' ? EXERCISE_VIDEOS.greeting : EXERCISE_VIDEOS[activePose] || EXERCISE_VIDEOS.greeting)
+    : praising || (mode === 'steps' && live?.ok)
+      ? EXERCISE_VIDEOS.success
+      : hintError
+        ? EXERCISE_VIDEOS.retry
+        : EXERCISE_VIDEOS[activePose] || EXERCISE_VIDEOS.greeting;
 
   useEffect(() => {
     if (praising || !live?.message || live.ok || phase !== 'practice' || (mode === 'sequence' && seqStage !== 'play')) {
@@ -869,37 +891,6 @@ function LessonScreen({ faculty, lesson, onBack, onFinish }) {
     if (!showHint || !stableHint) return;
     speakRu(stableHint);
   }, [showHint, stableHint]);
-
-  useEffect(() => {
-    if (phase !== 'practice') {
-      setMascotState('idle');
-      return;
-    }
-    if (mode === 'sequence' && seqStage === 'memorize') {
-      const shown = steps.filter((entry) => entry.round === step.round)[Math.max(0, revealCount - 1)];
-      if (shown?.pose === 'left-arm') setMascotState('raiseLeft');
-      else if (shown?.pose === 'right-arm') setMascotState('raiseRight');
-      else setMascotState('idle');
-      return;
-    }
-    if (mode === 'sequence' && seqStage === 'play' && !praising) {
-      if (hintError && /а нужна/.test(live?.message || '')) setMascotState('error');
-      else setMascotState('idle');
-      return;
-    }
-    if (praising || (mode === 'steps' && live?.ok)) {
-      setMascotState('success');
-      return;
-    }
-    if (hintError && /рука/.test(live?.message || '') && /не |а нужна/.test(live?.message || '')) {
-      setMascotState('error');
-      return;
-    }
-    if (activePose === 'left-arm') setMascotState('raiseLeft');
-    else if (activePose === 'right-arm') setMascotState('raiseRight');
-    else if (activePose === 'both-arms') setMascotState('bothHands');
-    else setMascotState('idle');
-  }, [phase, activePose, live?.ok, live?.message, hintError, praising, mode, seqStage, revealCount, step.round, steps]);
 
   return (
     <section className="lesson-page">
@@ -942,7 +933,7 @@ function LessonScreen({ faculty, lesson, onBack, onFinish }) {
           </div>
         </div>
         <div className="coach-panel">
-          <Mascot state={mascotState} />
+          <ExerciseVideo src={demoVideo} />
           {phase === 'prep' ? (
             <>
               <div className="coach-bubble">
@@ -1136,6 +1127,13 @@ function ParentsScreen({ doneToday, streak, stars }) {
         <Metric icon={<Flame />} value={`${streak} дней`} label="серия занятий" />
         <Metric icon={<Star />} value={`${stars}`} label="звёзд" />
       </div>
+      <article className="parent-report voice-settings">
+        <div className="report-header">
+          <div><span className="rail-overline">ГОЛОС MOVO</span><h3>Как звучит Мово</h3></div>
+          <button className="primary-button voice-preview" onClick={() => speakRu('Привет! Я Мово. Давай попробуем вместе. У тебя всё получится!', { force: true })}>Послушать</button>
+        </div>
+        <p>Мово говорит голосом Каролины. Прослушай приветствие — так звучат записанные реплики в упражнениях.</p>
+      </article>
       <article className="parent-report">
         <div className="report-header">
           <div>

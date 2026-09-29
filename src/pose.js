@@ -2,11 +2,9 @@ const VISION_VERSION = '0.10.21';
 const WASM_BASE = `https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@${VISION_VERSION}/wasm`;
 const MODEL_URL = 'https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/1/pose_landmarker_lite.task';
 
-export const HOLD_MS = 1000;
+export const HOLD_MS = 700;
 export const FRAME_HINT = 'Встань в рамку, тебя не полностью видно';
 export const HIGHER_HINT = 'Подними руку выше';
-export const STRAIGHT_HINT = 'Держи руку ровнее';
-export const STRAIGHT_BOTH_HINT = 'Держи руки ровнее';
 export const OTHER_ARM_HINT = 'Опусти другую руку';
 export const HOLD_HINT = 'Вот так, держи ещё немного';
 export const WRONG_RIGHT_HINT = 'Это правая рука, а нужна левая';
@@ -15,8 +13,6 @@ export const WRONG_LEFT_HINT = 'Это левая рука, а нужна пра
 const NOSE = 0;
 const LEFT_SHOULDER = 11;
 const RIGHT_SHOULDER = 12;
-const LEFT_ELBOW = 13;
-const RIGHT_ELBOW = 14;
 const LEFT_WRIST = 15;
 const RIGHT_WRIST = 16;
 const LEFT_HIP = 23;
@@ -31,18 +27,18 @@ const BONES = [
 const DOTS = [0, 11, 12, 13, 14, 15, 16, 23, 24];
 
 function visible(point) {
-  return Boolean(point) && (point.visibility ?? 1) >= 0.5;
+  return Boolean(point) && (point.visibility ?? 1) >= 0.35;
 }
 
 export function bodyInFrame(landmarks) {
   if (!landmarks || landmarks.length < 25) return false;
-  const needed = [NOSE, LEFT_SHOULDER, RIGHT_SHOULDER, LEFT_ELBOW, RIGHT_ELBOW, LEFT_WRIST, RIGHT_WRIST, LEFT_HIP, RIGHT_HIP];
+  const needed = [NOSE, LEFT_SHOULDER, RIGHT_SHOULDER, LEFT_HIP, RIGHT_HIP];
   if (!needed.every((index) => visible(landmarks[index]))) return false;
   const nose = landmarks[NOSE];
   const shoulderY = (landmarks[LEFT_SHOULDER].y + landmarks[RIGHT_SHOULDER].y) / 2;
   const hipY = (landmarks[LEFT_HIP].y + landmarks[RIGHT_HIP].y) / 2;
   if (nose.y < 0.02 || nose.y > 0.62) return false;
-  if (hipY - shoulderY < 0.12) return false;
+  if (hipY - shoulderY < 0.1) return false;
   if (hipY > 0.98) return false;
   return true;
 }
@@ -52,27 +48,8 @@ export function frameStatus(landmarks) {
   return { ok: true, message: 'Отлично, тебя видно целиком' };
 }
 
-function armAngle(shoulder, elbow, wrist) {
-  const toShoulderX = shoulder.x - elbow.x;
-  const toShoulderY = shoulder.y - elbow.y;
-  const toWristX = wrist.x - elbow.x;
-  const toWristY = wrist.y - elbow.y;
-  const magnitude = Math.hypot(toShoulderX, toShoulderY) * Math.hypot(toWristX, toWristY);
-  if (!magnitude) return 0;
-  const cosine = Math.min(1, Math.max(-1, (toShoulderX * toWristX + toShoulderY * toWristY) / magnitude));
-  return (Math.acos(cosine) * 180) / Math.PI;
-}
-
 function wristAboveShoulder(shoulder, wrist) {
-  return wrist.y < shoulder.y - 0.05;
-}
-
-function elbowRaised(shoulder, elbow) {
-  return elbow.y < shoulder.y + 0.02;
-}
-
-function armStraight(shoulder, elbow, wrist) {
-  return armAngle(shoulder, elbow, wrist) >= 145;
+  return visible(shoulder) && visible(wrist) && wrist.y < shoulder.y - 0.02;
 }
 
 function wrongSideMessage(pose) {
@@ -82,19 +59,15 @@ function wrongSideMessage(pose) {
 function singleArm(landmarks, pose) {
   const left = pose === 'left-arm';
   const shoulder = landmarks[left ? LEFT_SHOULDER : RIGHT_SHOULDER];
-  const elbow = landmarks[left ? LEFT_ELBOW : RIGHT_ELBOW];
   const wrist = landmarks[left ? LEFT_WRIST : RIGHT_WRIST];
   const otherShoulder = landmarks[left ? RIGHT_SHOULDER : LEFT_SHOULDER];
   const otherWrist = landmarks[left ? RIGHT_WRIST : LEFT_WRIST];
   const targetUp = wristAboveShoulder(shoulder, wrist);
-  const otherUp = wristAboveShoulder(otherShoulder, otherWrist);
+  const otherUp = visible(otherWrist) && wristAboveShoulder(otherShoulder, otherWrist);
 
   if (!targetUp && otherUp) return { ok: false, message: wrongSideMessage(pose) };
   if (!targetUp) return { ok: false, message: HIGHER_HINT };
   if (otherUp) return { ok: false, message: OTHER_ARM_HINT };
-  if (!elbowRaised(shoulder, elbow) || !armStraight(shoulder, elbow, wrist)) {
-    return { ok: false, message: STRAIGHT_HINT };
-  }
   return { ok: true, message: HOLD_HINT };
 }
 
@@ -102,11 +75,6 @@ function bothArms(landmarks) {
   const leftUp = wristAboveShoulder(landmarks[LEFT_SHOULDER], landmarks[LEFT_WRIST]);
   const rightUp = wristAboveShoulder(landmarks[RIGHT_SHOULDER], landmarks[RIGHT_WRIST]);
   if (!leftUp || !rightUp) return { ok: false, message: HIGHER_HINT };
-  const leftStraight = elbowRaised(landmarks[LEFT_SHOULDER], landmarks[LEFT_ELBOW])
-    && armStraight(landmarks[LEFT_SHOULDER], landmarks[LEFT_ELBOW], landmarks[LEFT_WRIST]);
-  const rightStraight = elbowRaised(landmarks[RIGHT_SHOULDER], landmarks[RIGHT_ELBOW])
-    && armStraight(landmarks[RIGHT_SHOULDER], landmarks[RIGHT_ELBOW], landmarks[RIGHT_WRIST]);
-  if (!leftStraight || !rightStraight) return { ok: false, message: STRAIGHT_BOTH_HINT };
   return { ok: true, message: HOLD_HINT };
 }
 
