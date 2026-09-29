@@ -53,10 +53,18 @@ const EXERCISE_VIDEOS = {
   retry: '/videos/try-again.mp4',
 };
 
-function ExerciseVideo({ src }) {
+function ExerciseVideo({ src, pose, playbackKey }) {
   return (
     <div className="exercise-video-wrap" aria-label="Демонстрация движения от Мово">
-      <video key={src} className="exercise-video" src={src} autoPlay muted loop playsInline />
+      <video
+        key={`${src}-${playbackKey}`}
+        className={`exercise-video${pose === 'left-arm' ? ' is-mirrored' : ''}`}
+        src={src}
+        autoPlay
+        muted
+        loop
+        playsInline
+      />
     </div>
   );
 }
@@ -251,7 +259,7 @@ function FacultiesScreen({ progress, onOpen }) {
                 </span>
                 {state !== 'locked' && (
                   <button onClick={(event) => { event.stopPropagation(); onOpen(item); }}>
-                    {state === 'done' ? 'Ещё раз' : 'Продолжить'} <ArrowRight size={15} />
+                    {state === 'done' ? 'Сыграть ещё' : 'Играть'} <ArrowRight size={15} />
                   </button>
                 )}
               </div>
@@ -299,7 +307,7 @@ function PathScreen({ faculty, progress, onLesson, onOpenFaculty }) {
             <div className="course-progress"><span style={{ width: `${(done / total) * 100}%` }} /></div>
           </div>
           <button className="continue-button" onClick={() => onLesson(current ?? faculty.lessons[0])}>
-            <Play size={16} fill="currentColor" /> {current ? 'Продолжить' : 'Ещё раз'}
+            <Play size={18} fill="currentColor" /> {current ? 'Начать урок' : 'Сыграть ещё'}
           </button>
         </div>
         <div className="lesson-map-wrap">
@@ -529,7 +537,7 @@ function LessonScreen({ faculty, lesson, onBack, onFinish }) {
       busyRef.current = false;
       setPraising(false);
       advance();
-    }, 1300);
+    }, 2850);
   };
 
   const beginRecall = () => {
@@ -580,7 +588,7 @@ function LessonScreen({ faculty, lesson, onBack, onFinish }) {
         setRevealCount(0);
         setSeqStage('memorize');
         seqStageRef.current = 'memorize';
-      }, 1800);
+      }, 3000);
     }, 700);
   };
 
@@ -674,13 +682,13 @@ function LessonScreen({ faculty, lesson, onBack, onFinish }) {
     setRevealCount(1);
     const timers = [];
     for (let index = 1; index < count; index += 1) {
-      timers.push(window.setTimeout(() => setRevealCount(index + 1), index * 1400));
+      timers.push(window.setTimeout(() => setRevealCount(index + 1), index * 1900));
     }
     timers.push(window.setTimeout(() => {
       seqClockStart.current = Date.now();
       setSeqClock(0);
       setSeqStage('play');
-    }, count * 1400 + 2200));
+    }, count * 1900 + 2100));
     return () => timers.forEach((timer) => window.clearTimeout(timer));
   }, [phase, lesson.id, lesson.mode, lesson.steps, seqStage, stepIndex]);
 
@@ -696,6 +704,7 @@ function LessonScreen({ faculty, lesson, onBack, onFinish }) {
     let raf = 0;
     let lastUi = 0;
     let holdStart = 0;
+    let lastGoodAt = 0;
     let fired = false;
     let armedStep = -1;
     let lastVideoTime = -1;
@@ -725,6 +734,7 @@ function LessonScreen({ faculty, lesson, onBack, onFinish }) {
         armedStep = index;
         fired = false;
         holdStart = 0;
+        lastGoodAt = 0;
         missLatch.current = false;
       }
       const current = modeRef.current === 'boss'
@@ -744,6 +754,7 @@ function LessonScreen({ faculty, lesson, onBack, onFinish }) {
       drawPose(canvasRef.current, points, video, { error: !verdict.ok });
       if (verdict.ok) {
         if (!holdStart) holdStart = timestamp;
+        lastGoodAt = timestamp;
         const holdMs = modeRef.current === 'boss' ? 280 : HOLD_MS;
         const ratio = Math.min(1, (timestamp - holdStart) / holdMs);
         if (timestamp - lastUi > 80) {
@@ -758,7 +769,7 @@ function LessonScreen({ faculty, lesson, onBack, onFinish }) {
         }
         return;
       }
-      holdStart = 0;
+      if (timestamp - lastGoodAt > 180) holdStart = 0;
       const wrongSide = /а нужна/.test(verdict.message || '');
       if (wrongSide && !missLatch.current && !busyRef.current && modeRef.current === 'boss') {
         missLatch.current = true;
@@ -823,6 +834,10 @@ function LessonScreen({ faculty, lesson, onBack, onFinish }) {
   const activePose = bossMode ? bossPose : step.pose;
   const command = bossMode ? (bossPose === 'left-arm' ? 'Лево!' : 'Право!') : step.prompt;
   const roundSteps = mode === 'sequence' ? steps.filter((item) => item.round === step.round) : [];
+  const revealedSequenceStep = mode === 'sequence' && seqStage === 'memorize'
+    ? roundSteps[Math.max(0, revealCount - 1)]
+    : null;
+  const demoPose = revealedSequenceStep?.pose || activePose;
   const indexInRound = Math.max(0, roundSteps.indexOf(step));
   const prepTask = mode === 'sequence' ? 'Запомни порядок' : mode === 'boss' ? 'Лево или право' : steps[0].prompt;
   const taskTitle = mode === 'sequence'
@@ -839,7 +854,6 @@ function LessonScreen({ faculty, lesson, onBack, onFinish }) {
   const bar = bossMode
     ? Math.max(0, (bossLeft / 30000) * 100)
     : Math.max(8, ((stepIndex + (cameraOn && step.pose && !poseFailed && mode !== 'sequence' ? hold : 0)) / steps.length) * 100);
-  const hintError = Boolean(live && !live.ok && !praising && !(mode === 'sequence' && seqStage !== 'play'));
   const spoken = phase === 'prep'
     ? (bossMode ? 'Начинаем испытание! Повторяй за мной.' : prepTask)
     : mode === 'sequence'
@@ -849,7 +863,7 @@ function LessonScreen({ faculty, lesson, onBack, onFinish }) {
         : (bossMode ? '' : step.prompt);
   const levelWord = faculty.id === 'sides' ? 'УРОВЕНЬ' : 'УПРАЖНЕНИЕ';
   const practiceLead = bossMode
-    ? 'Тридцать секунд. Повторяй сторону, которую называет Мово.'
+    ? 'Тридцать секунд. Повторяй сторону, которую видишь на экране.'
     : mode === 'sequence'
       ? 'Сначала последовательность на экране, потом ты повторяешь её. Оценка по времени, без спешки.'
       : mode === 'intro'
@@ -857,12 +871,11 @@ function LessonScreen({ faculty, lesson, onBack, onFinish }) {
         : 'Посмотри на Мово и повторяй движения в своём темпе.';
   const showHint = Boolean(stableHint) && !praising && phase === 'practice' && !(mode === 'sequence' && seqStage !== 'play');
   const demoVideo = phase === 'prep'
-    ? (mode === 'boss' ? EXERCISE_VIDEOS.greeting : EXERCISE_VIDEOS[activePose] || EXERCISE_VIDEOS.greeting)
+    ? (mode === 'boss' ? EXERCISE_VIDEOS.greeting : EXERCISE_VIDEOS[demoPose] || EXERCISE_VIDEOS.greeting)
     : praising || (mode === 'steps' && live?.ok)
       ? EXERCISE_VIDEOS.success
-      : hintError
-        ? EXERCISE_VIDEOS.retry
-        : EXERCISE_VIDEOS[activePose] || EXERCISE_VIDEOS.greeting;
+      : EXERCISE_VIDEOS[demoPose] || EXERCISE_VIDEOS.greeting;
+  const demoPlaybackKey = `${phase}-${stepIndex}-${bossSerial}-${revealCount}-${praising ? 'success' : 'move'}`;
 
   useEffect(() => {
     if (praising || !live?.message || live.ok || phase !== 'practice' || (mode === 'sequence' && seqStage !== 'play')) {
@@ -929,27 +942,42 @@ function LessonScreen({ faculty, lesson, onBack, onFinish }) {
           <div className="camera-label"><span className={cameraOn ? 'cam-live' : ''} />{cameraOn ? 'КАМЕРА ВКЛЮЧЕНА' : 'ПРЕДПРОСМОТР УРОКА'}</div>
           {showHint && <div className="screen-hint">{stableHint}</div>}
           {praising && phase === 'practice' && mode !== 'sequence' && <div className="screen-hint ok">Правильно!</div>}
-          <div className="camera-controls">
-            <button className="camera-control" onClick={cameraOn ? stopCamera : startCamera}>{cameraOn ? 'Выключить камеру' : 'Включить камеру'}</button>
-            <span>Изображение остаётся на устройстве</span>
-          </div>
+          {phase === 'practice' && (
+            <div className="camera-controls">
+              <button className="camera-control" onClick={cameraOn ? stopCamera : startCamera}>{cameraOn ? 'Выключить камеру' : 'Включить камеру'}</button>
+              <span>Изображение остаётся на устройстве</span>
+            </div>
+          )}
         </div>
         <div className="coach-panel">
-          <ExerciseVideo src={demoVideo} />
+          <ExerciseVideo src={demoVideo} pose={demoPose} playbackKey={demoPlaybackKey} />
           {phase === 'prep' ? (
             <>
               <div className="coach-bubble">
                 <span className="bubble-kicker">ЗАДАНИЕ</span>
                 <h2>{prepTask}</h2>
-                <p>{mode === 'sequence' ? 'Сначала Мово покажет порядок на несколько секунд. Потом ты повторишь его по памяти.' : mode === 'boss' ? 'Мово будет называть сторону. Повторяй её.' : steps[0].detail}</p>
+                <p>{mode === 'sequence' ? 'Сначала Мово покажет порядок на несколько секунд. Потом ты повторишь его по памяти.' : mode === 'boss' ? 'На экране появится сторона. Повторяй её.' : steps[0].detail}</p>
               </div>
               <ul className="prep-list">
                 <li><Check size={16} /> Камера смотрит на тебя</li>
                 <li><Check size={16} /> Видно всё тело до пояса</li>
                 <li><Check size={16} /> Рядом есть место для рук</li>
               </ul>
-              {!cameraOn && <button className="primary-button practice-button" onClick={startCamera}>Разрешить камеру <ArrowRight size={17} /></button>}
-              {cameraOn && <button className="primary-button practice-button" onClick={() => setPhase('practice')}>Я в кадре <ArrowRight size={17} /></button>}
+              {!cameraOn && <button className="primary-button practice-button" onClick={startCamera}>Включить камеру и начать <ArrowRight size={19} /></button>}
+              {cameraOn && (
+                <>
+                  <p className={`camera-readiness${poseReady && live?.ok ? ' is-ready' : ''}`} role="status">
+                    {!poseReady ? 'Мово настраивает камеру…' : live?.ok ? 'Отлично, тебя видно целиком' : live?.message || 'Встань в рамку'}
+                  </p>
+                  <button
+                    className="primary-button practice-button"
+                    disabled={!poseReady || !live?.ok}
+                    onClick={() => setPhase('practice')}
+                  >
+                    {!poseReady ? 'Настраиваем камеру…' : live?.ok ? 'Начать упражнение' : 'Встань в рамку'} <ArrowRight size={19} />
+                  </button>
+                </>
+              )}
               <button className="secondary-button" onClick={() => { stopCamera(); setPhase('practice'); }}>Пройти без камеры</button>
             </>
           ) : (
@@ -989,7 +1017,7 @@ function LessonScreen({ faculty, lesson, onBack, onFinish }) {
               {poseFailed && <p className="practice-disclaimer">Распознавание не загрузилось. Можно пройти по кнопке.</p>}
               {manualAllowed && (
                 <button className="primary-button practice-button" disabled={praising} onClick={() => hitRef.current()}>
-                  {mode === 'sequence' && seqStage === 'memorize' ? 'Я запомнил' : mode === 'sequence' ? 'Я вспомнил' : bossMode ? 'Я сделал!' : 'Я сделал'} <ArrowRight size={17} />
+                  {mode === 'sequence' && seqStage === 'memorize' ? 'Я запомнил порядок' : mode === 'sequence' ? 'Я повторил движение' : bossMode ? 'Я выполнил!' : 'Я выполнил движение'} <ArrowRight size={19} />
                 </button>
               )}
               {cameraOn && activePose && poseReady && !poseFailed && mode !== 'sequence' && <p className="practice-disclaimer">{bossMode ? 'Команда остаётся на месте. Подсказка, если нужна, появится на экране.' : 'Задание не исчезает. Подсказка, если нужна, появится красным на экране.'}</p>}

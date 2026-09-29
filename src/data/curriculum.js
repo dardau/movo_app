@@ -50,7 +50,7 @@ export const faculties = [
         minutes: '30 секунд',
         mode: 'boss',
         steps: [
-          { pose: 'left-arm', prompt: 'Лево!', detail: 'Успей показать сторону, которую назвал Мово.' },
+          { pose: 'left-arm', prompt: 'Лево!', detail: 'Успей показать сторону, которую видишь на экране.' },
         ],
       },
     ],

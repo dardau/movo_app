@@ -26,8 +26,8 @@ const BONES = [
 
 const DOTS = [0, 11, 12, 13, 14, 15, 16, 23, 24];
 
-function visible(point) {
-  return Boolean(point) && (point.visibility ?? 1) >= 0.35;
+function visible(point, confidence = 0.35) {
+  return Boolean(point) && (point.visibility ?? 1) >= confidence;
 }
 
 export function bodyInFrame(landmarks) {
@@ -48,8 +48,11 @@ export function frameStatus(landmarks) {
   return { ok: true, message: 'Отлично, тебя видно целиком' };
 }
 
-function wristAboveShoulder(shoulder, wrist) {
-  return visible(shoulder) && visible(wrist) && wrist.y < shoulder.y - 0.02;
+function wristAboveShoulder(shoulder, wrist, hip) {
+  if (!visible(shoulder) || !visible(wrist, 0.45) || !visible(hip)) return false;
+  const torsoHeight = Math.max(0.1, hip.y - shoulder.y);
+  const margin = Math.min(0.055, Math.max(0.025, torsoHeight * 0.12));
+  return wrist.y < shoulder.y - margin;
 }
 
 function wrongSideMessage(pose) {
@@ -60,10 +63,12 @@ function singleArm(landmarks, pose) {
   const left = pose === 'left-arm';
   const shoulder = landmarks[left ? LEFT_SHOULDER : RIGHT_SHOULDER];
   const wrist = landmarks[left ? LEFT_WRIST : RIGHT_WRIST];
+  const hip = landmarks[left ? LEFT_HIP : RIGHT_HIP];
   const otherShoulder = landmarks[left ? RIGHT_SHOULDER : LEFT_SHOULDER];
   const otherWrist = landmarks[left ? RIGHT_WRIST : LEFT_WRIST];
-  const targetUp = wristAboveShoulder(shoulder, wrist);
-  const otherUp = visible(otherWrist) && wristAboveShoulder(otherShoulder, otherWrist);
+  const otherHip = landmarks[left ? RIGHT_HIP : LEFT_HIP];
+  const targetUp = wristAboveShoulder(shoulder, wrist, hip);
+  const otherUp = wristAboveShoulder(otherShoulder, otherWrist, otherHip);
 
   if (!targetUp && otherUp) return { ok: false, message: wrongSideMessage(pose) };
   if (!targetUp) return { ok: false, message: HIGHER_HINT };
@@ -72,8 +77,8 @@ function singleArm(landmarks, pose) {
 }
 
 function bothArms(landmarks) {
-  const leftUp = wristAboveShoulder(landmarks[LEFT_SHOULDER], landmarks[LEFT_WRIST]);
-  const rightUp = wristAboveShoulder(landmarks[RIGHT_SHOULDER], landmarks[RIGHT_WRIST]);
+  const leftUp = wristAboveShoulder(landmarks[LEFT_SHOULDER], landmarks[LEFT_WRIST], landmarks[LEFT_HIP]);
+  const rightUp = wristAboveShoulder(landmarks[RIGHT_SHOULDER], landmarks[RIGHT_WRIST], landmarks[RIGHT_HIP]);
   if (!leftUp || !rightUp) return { ok: false, message: HIGHER_HINT };
   return { ok: true, message: HOLD_HINT };
 }
