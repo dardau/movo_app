@@ -3,7 +3,7 @@ const WASM_BASE = `https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@${VISION
 const MODEL_URL = 'https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/1/pose_landmarker_lite.task';
 
 export const HOLD_MS = 700;
-export const FRAME_HINT = 'Встань в рамку, тебя не полностью видно';
+export const FRAME_HINT = 'Я тебя не вижу целиком. Отойди чуть дальше.';
 export const HIGHER_HINT = 'Подними руку выше';
 export const OTHER_ARM_HINT = 'Опусти другую руку';
 export const HOLD_HINT = 'Вот так, держи ещё немного';

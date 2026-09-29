@@ -804,6 +804,7 @@ function LessonScreen({ faculty, lesson, onBack, onFinish }) {
 
   const startCamera = async () => {
     if (!navigator.mediaDevices?.getUserMedia) {
+      speakRu('Не получилось включить камеру. Позови взрослого помочь.', { force: true });
       setModal(true);
       return;
     }
@@ -814,6 +815,7 @@ function LessonScreen({ faculty, lesson, onBack, onFinish }) {
       setPoseFailed(false);
     } catch {
       setCameraOn(false);
+      speakRu('Не получилось включить камеру. Позови взрослого помочь.', { force: true });
       setModal(true);
     }
   };
@@ -839,12 +841,12 @@ function LessonScreen({ faculty, lesson, onBack, onFinish }) {
     : Math.max(8, ((stepIndex + (cameraOn && step.pose && !poseFailed && mode !== 'sequence' ? hold : 0)) / steps.length) * 100);
   const hintError = Boolean(live && !live.ok && !praising && !(mode === 'sequence' && seqStage !== 'play'));
   const spoken = phase === 'prep'
-    ? prepTask
+    ? (bossMode ? 'Начинаем испытание! Повторяй за мной.' : prepTask)
     : mode === 'sequence'
-      ? (seqStage === 'play' ? 'Повтори' : seqStage === 'mark' ? (seqGrade || 'Молодец') : '')
+      ? (seqStage === 'mark' ? (seqGrade || 'Молодец') : '')
       : praising
-        ? 'Правильно!'
-        : (bossMode ? (bossSerial > 0 ? command : '') : step.prompt);
+        ? (bossMode ? '' : stepIndex + 1 < steps.length ? 'Отлично! А теперь следующее движение.' : '')
+        : (bossMode ? '' : step.prompt);
   const levelWord = faculty.id === 'sides' ? 'УРОВЕНЬ' : 'УПРАЖНЕНИЕ';
   const practiceLead = bossMode
     ? 'Тридцать секунд. Повторяй сторону, которую называет Мово.'
@@ -1012,6 +1014,11 @@ function LessonScreen({ faculty, lesson, onBack, onFinish }) {
 }
 
 function ResultScreen({ result, onContinue }) {
+  useEffect(() => {
+    speakRu('Урок пройден! Ты отлично справился.', { force: true });
+    return () => resetSpeech();
+  }, []);
+
   return (
     <section className="result-page">
       <div className="result-confetti">✦</div>
