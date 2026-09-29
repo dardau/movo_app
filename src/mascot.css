@@ -1,0 +1,208 @@
+.movo-mascot {
+  position: relative;
+  width: min(250px, 38vw);
+  height: 300px;
+  margin: 0 auto;
+  flex: none;
+  overflow: visible;
+}
+
+.movo-bob,
+.movo-sway {
+  position: absolute;
+  inset: 0;
+}
+
+.movo-bob {
+  transform-origin: 50% 82%;
+  animation: movo-breathe 3.8s ease-in-out infinite;
+}
+
+.movo-sway {
+  transform-origin: 50% 78%;
+}
+
+.movo-body {
+  position: absolute;
+  left: 24%;
+  top: 34%;
+  width: 52%;
+  height: auto;
+  z-index: 2;
+  pointer-events: none;
+}
+
+.movo-head-slot {
+  position: absolute;
+  left: 10%;
+  top: 0;
+  width: 80%;
+  z-index: 3;
+  transform-origin: 50% 92%;
+  animation: movo-head-idle 4.4s ease-in-out infinite;
+}
+
+.movo-head,
+.movo-arm {
+  display: block;
+  width: 100%;
+  height: auto;
+  pointer-events: none;
+}
+
+.movo-arm-slot {
+  position: absolute;
+  width: 24%;
+  z-index: 1;
+}
+
+.movo-arm-right {
+  left: 4%;
+  top: 39%;
+}
+
+.movo-arm-left {
+  right: 4%;
+  top: 39%;
+}
+
+.movo-arm {
+  transform-origin: 50% 5%;
+}
+
+.movo-arm-right .movo-arm { animation: movo-arm-idle-right 4s ease-in-out infinite; }
+.movo-arm-left .movo-arm { animation: movo-arm-idle-left 4.3s ease-in-out infinite; }
+
+@keyframes movo-breathe {
+  0%, 100% { transform: translateY(0) scale(1, 1); }
+  50% { transform: translateY(-7px) scale(1.02, 0.985); }
+}
+
+@keyframes movo-head-idle {
+  0%, 100% { transform: rotate(-3deg); }
+  50% { transform: rotate(3.5deg) translateY(-2px); }
+}
+
+@keyframes movo-arm-idle-right {
+  0%, 100% { transform: rotate(7deg); }
+  50% { transform: rotate(-5deg); }
+}
+
+@keyframes movo-arm-idle-left {
+  0%, 100% { transform: rotate(-7deg); }
+  50% { transform: rotate(5deg); }
+}
+
+.is-raiseLeft .movo-sway { animation: movo-lean-left 2.4s ease-in-out infinite; }
+.is-raiseLeft .movo-head-slot { animation: movo-head-left 2.4s ease-in-out infinite; }
+.is-raiseLeft .movo-arm-left .movo-arm { animation: movo-raise-left 2.4s ease-in-out infinite; }
+.is-raiseLeft .movo-arm-right .movo-arm { animation: movo-arm-idle-right 4s ease-in-out infinite; }
+
+.is-raiseRight .movo-sway { animation: movo-lean-right 2.4s ease-in-out infinite; }
+.is-raiseRight .movo-head-slot { animation: movo-head-right 2.4s ease-in-out infinite; }
+.is-raiseRight .movo-arm-right .movo-arm { animation: movo-raise-right 2.4s ease-in-out infinite; }
+.is-raiseRight .movo-arm-left .movo-arm { animation: movo-arm-idle-left 4.3s ease-in-out infinite; }
+
+.is-bothHands .movo-sway { animation: movo-lean-both 2.6s ease-in-out infinite; }
+.is-bothHands .movo-head-slot { animation: movo-head-both 2.6s ease-in-out infinite; }
+.is-bothHands .movo-arm-left .movo-arm { animation: movo-raise-left 2.6s ease-in-out infinite; }
+.is-bothHands .movo-arm-right .movo-arm { animation: movo-raise-right 2.6s ease-in-out 0.14s infinite; }
+
+.is-success .movo-bob { animation: movo-jump 1.25s ease-in-out 1 both; }
+.is-success .movo-head-slot { animation: movo-head-cheer 1.25s ease-in-out 1 both; }
+.is-success .movo-arm-left .movo-arm { animation: movo-cheer-left 1.25s ease-out 1 both; }
+.is-success .movo-arm-right .movo-arm { animation: movo-cheer-right 1.25s ease-out 0.08s 1 both; }
+
+.is-error .movo-sway { animation: movo-sorry 1.15s ease-in-out 1 both; }
+.is-error .movo-head-slot { animation: movo-head-shake 1.15s ease-in-out 1 both; }
+.is-error .movo-arm-left .movo-arm { animation: movo-arm-drop-left 1.15s ease-in-out 1 both; }
+.is-error .movo-arm-right .movo-arm { animation: movo-arm-drop-right 1.15s ease-in-out 1 both; }
+
+@keyframes movo-raise-left {
+  0%, 12%, 100% { transform: rotate(-6deg); }
+  34%, 62% { transform: rotate(118deg); }
+}
+
+@keyframes movo-raise-right {
+  0%, 12%, 100% { transform: rotate(6deg); }
+  34%, 62% { transform: rotate(-118deg); }
+}
+
+@keyframes movo-lean-left {
+  0%, 12%, 100% { transform: rotate(0deg); }
+  34%, 62% { transform: rotate(4deg) translateX(2px); }
+}
+
+@keyframes movo-lean-right {
+  0%, 12%, 100% { transform: rotate(0deg); }
+  34%, 62% { transform: rotate(-4deg) translateX(-2px); }
+}
+
+@keyframes movo-lean-both {
+  0%, 100% { transform: translateY(0); }
+  40%, 68% { transform: translateY(-3px); }
+}
+
+@keyframes movo-head-left {
+  0%, 12%, 100% { transform: rotate(-2deg); }
+  34%, 62% { transform: rotate(7deg); }
+}
+
+@keyframes movo-head-right {
+  0%, 12%, 100% { transform: rotate(2deg); }
+  34%, 62% { transform: rotate(-7deg); }
+}
+
+@keyframes movo-head-both {
+  0%, 100% { transform: rotate(0deg); }
+  45% { transform: rotate(-4deg); }
+  70% { transform: rotate(4deg); }
+}
+
+@keyframes movo-jump {
+  0% { transform: translateY(0) scale(1, 1); }
+  28% { transform: translateY(4px) scale(1.04, 0.94); }
+  52% { transform: translateY(-20px) scale(0.96, 1.05); }
+  76% { transform: translateY(0) scale(1.03, 0.97); }
+  100% { transform: translateY(0) scale(1, 1); }
+}
+
+@keyframes movo-head-cheer {
+  0%, 100% { transform: rotate(0deg); }
+  40% { transform: rotate(-8deg); }
+  68% { transform: rotate(8deg); }
+}
+
+@keyframes movo-cheer-left {
+  0% { transform: rotate(-6deg); }
+  40%, 100% { transform: rotate(124deg); }
+}
+
+@keyframes movo-cheer-right {
+  0% { transform: rotate(6deg); }
+  40%, 100% { transform: rotate(-124deg); }
+}
+
+@keyframes movo-sorry {
+  0%, 100% { transform: rotate(0deg); }
+  35% { transform: rotate(-5deg) translateY(3px); }
+  70% { transform: rotate(4deg) translateY(2px); }
+}
+
+@keyframes movo-head-shake {
+  0%, 100% { transform: rotate(0deg); }
+  20% { transform: rotate(-12deg); }
+  40% { transform: rotate(11deg); }
+  60% { transform: rotate(-7deg); }
+  80% { transform: rotate(5deg); }
+}
+
+@keyframes movo-arm-drop-left {
+  0% { transform: rotate(-6deg); }
+  45%, 100% { transform: rotate(-18deg); }
+}
+
+@keyframes movo-arm-drop-right {
+  0% { transform: rotate(6deg); }
+  45%, 100% { transform: rotate(18deg); }
+}

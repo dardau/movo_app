@@ -1,169 +1,1165 @@
-import React, { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
-import { Activity, ArrowLeft, ArrowRight, Award, Check, ChevronRight, CircleHelp, Clock3, Flame, Footprints, Hand, Home, LockKeyhole, Menu, Play, Shield, Sparkles, Star, Target, Trophy, X } from 'lucide-react';
+import { flushSync } from 'react-dom';
+import {
+  ArrowLeft, ArrowRight, Award, Check, ChevronRight, CircleHelp, Clock3, Flame,
+  Footprints, LockKeyhole, Menu, Play, Shield, Sparkles, Star, Target, Trophy, X,
+} from 'lucide-react';
+import { faculties, STAR_REWARD } from './data/curriculum.js';
+import {
+  completeLesson, currentWork, facultyState, lessonState, lessonsDone, loadProgress,
+  saveProgress, todayLessons,
+} from './progress.js';
+import { createPoseLandmarker, drawPose, evaluatePose, frameStatus, HOLD_MS } from './pose.js';
+import { Mascot } from './Mascot.jsx';
+import { resetSpeech, speakRu } from './speech.js';
 import './styles.css';
 
-const lessons = [
-  { id: 1, title: 'Левая рука', sub: 'Подними левую руку', state: 'current', icon: '←', commands: ['Подними левую руку', 'Покажи левую сторону ещё раз', 'Молодец! Ещё раз левая рука'] },
-  { id: 2, title: 'Правая рука', sub: 'Подними правую руку', state: 'locked', icon: '→', commands: ['Подними правую руку', 'Покажи правую сторону ещё раз', 'Отлично! Ещё раз правая рука'] },
-  { id: 3, title: 'Лево и право', sub: 'Выбери нужную сторону', state: 'locked', icon: '↔', commands: ['Подними левую руку', 'Теперь подними правую руку', 'Наклонись влево', 'Наклонись вправо'] },
-  { id: 4, title: 'Щит', sub: 'Защити академию', state: 'locked', icon: '⬡' },
-  { id: 5, title: 'Комбо', sub: 'Соедини движения', state: 'locked', icon: '✧' },
-  { id: 6, title: 'Реакция', sub: 'Успей за сигналом', state: 'locked', icon: '⚡' },
-  { id: 7, title: 'Испытание', sub: 'Проверь свои силы', state: 'locked', icon: '◇' },
-  { id: 8, title: 'Босс', sub: 'Большое приключение', state: 'boss', icon: '★' },
-];
+const DAY_LABELS = ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс'];
 
-const faculties = [
-  ['01', 'Факультет сторон', 'Лево и право', 'В пути', 'active', '↔'],
-  ['02', 'Факультет координации', 'Две стихии', 'Скоро откроется', 'upcoming', '✧'],
-  ['03', 'Факультет равновесия', 'Башня равновесия', 'Закрыт', 'locked', '♧'],
-  ['04', 'Факультет реакции', 'Арена реакции', 'Закрыт', 'locked', '⚡'],
-  ['05', 'Факультет памяти', 'Библиотека памяти', 'Закрыт', 'locked', '⌘'],
-];
+function minutesLabel(count) {
+  const mod10 = count % 10;
+  const mod100 = count % 100;
+  const word = mod10 === 1 && mod100 !== 11 ? 'минута' : mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14) ? 'минуты' : 'минут';
+  return `${count} ${word}`;
+}
+
+function gentleGrade(elapsed, moves) {
+  const each = elapsed / Math.max(1, moves);
+  if (each <= 6000) return 'Отлично';
+  if (each <= 10000) return 'Хорошо';
+  return 'Молодец';
+}
+
+function gentleNote(grade, elapsed) {
+  const seconds = Math.max(1, Math.round(elapsed / 1000));
+  if (grade === 'Отлично') return `${seconds} сек. Очень спокойно и точно.`;
+  if (grade === 'Хорошо') return `${seconds} сек. Хороший темп, ты вспомнил.`;
+  return `${seconds} сек. Ты вспомнил порядок. Это главное.`;
+}
+
+function formatTime(ms) {
+  const total = Math.max(0, Math.round(ms / 1000));
+  const minutes = Math.floor(total / 60);
+  const seconds = total % 60;
+  return `${minutes}:${String(seconds).padStart(2, '0')}`;
+}
 
 function App() {
-  const [screen, setScreen] = useState('path');
-  const [activeTab, setActiveTab] = useState('Путь');
-  const [lessonIndex, setLessonIndex] = useState(0);
-  const [modal, setModal] = useState(false);
-  const [cameraOn, setCameraOn] = useState(false);
+  const [progress, setProgress] = useState(loadProgress);
+  const [screen, setScreen] = useState('faculties');
+  const [activeTab, setActiveTab] = useState('Факультеты');
+  const [facultyId, setFacultyId] = useState(faculties[0].id);
+  const [lessonId, setLessonId] = useState(null);
   const [mobileNav, setMobileNav] = useState(false);
-  const [doneToday, setDoneToday] = useState(0);
-  const [completedLessons, setCompletedLessons] = useState(0);
-  const [streak, setStreak] = useState(7);
-  const videoRef = useRef(null);
-  const streamRef = useRef(null);
+  const [result, setResult] = useState(null);
+  const mainRef = useRef(null);
 
-  const lesson = lessons[lessonIndex];
+  const faculty = faculties.find((item) => item.id === facultyId) ?? faculties[0];
+  const lesson = faculty.lessons.find((item) => item.id === lessonId) ?? null;
+  const work = currentWork(progress);
+  const doneToday = todayLessons(progress);
+
+  const showScreen = (update) => {
+    flushSync(update);
+    const pane = mainRef.current;
+    if (pane) pane.scrollTop = 0;
+  };
+
+  const persist = (next) => {
+    saveProgress(next);
+    setProgress(next);
+  };
+
+  const go = (tab) => {
+    showScreen(() => {
+      setActiveTab(tab);
+      setMobileNav(false);
+      if (tab === 'Путь') {
+        setFacultyId(work.faculty.id);
+        setScreen('path');
+      } else if (tab === 'Факультеты') setScreen('faculties');
+      else if (tab === 'Задания') setScreen('tasks');
+      else if (tab === 'Награды') setScreen('rewards');
+      else if (tab === 'Для родителей') setScreen('parents');
+    });
+  };
+
+  const openFaculty = (nextFaculty) => {
+    const index = faculties.findIndex((item) => item.id === nextFaculty.id);
+    if (facultyState(progress, index) === 'locked') return;
+    showScreen(() => {
+      setFacultyId(nextFaculty.id);
+      setActiveTab('Путь');
+      setScreen('path');
+    });
+  };
+
+  const openLesson = (nextFaculty, nextLesson) => {
+    const facultyIndex = faculties.findIndex((item) => item.id === nextFaculty.id);
+    const lessonIndex = nextFaculty.lessons.findIndex((item) => item.id === nextLesson.id);
+    if (lessonState(progress, nextFaculty, lessonIndex) === 'locked' || facultyState(progress, facultyIndex) === 'locked') return;
+    showScreen(() => {
+      setFacultyId(nextFaculty.id);
+      setLessonId(nextLesson.id);
+      setActiveTab('Путь');
+      setScreen('lesson');
+    });
+  };
+
+  const finishLesson = (stats) => {
+    if (!lesson) return;
+    const already = progress.completedLessonIds.includes(lesson.id);
+    const next = completeLesson(progress, lesson.id, STAR_REWARD);
+    persist(next);
+    showScreen(() => {
+      setResult({
+        lesson,
+        faculty,
+        moves: stats.moves,
+        seconds: stats.seconds,
+        stars: already ? 0 : STAR_REWARD,
+        boss: Boolean(stats.boss),
+        correct: stats.correct ?? stats.moves,
+        grades: Array.isArray(stats.grades) ? stats.grades : null,
+      });
+      setScreen('result');
+    });
+  };
+
+  return (
+    <div className="app-shell">
+      <header className="topbar">
+        <button className="mobile-menu icon-button" onClick={() => setMobileNav(!mobileNav)} aria-label="Открыть меню"><Menu size={22} /></button>
+        <button className="brand" onClick={() => go('Факультеты')}><img src="/assets/logo.png" alt="" /><span className="brand-name">Movo</span><span className="brand-caption">Академия движения</span></button>
+        <div className="top-spacer" />
+        <div className="top-pill"><Flame size={18} fill="#ffd450" stroke="#ffd450" /><span>{progress.streak} дней</span></div>
+        <div className="top-pill"><Star size={18} fill="#5bd0f5" stroke="#5bd0f5" /><span>{progress.stars}</span></div>
+        <button className="profile" aria-label="Профиль">Л</button>
+      </header>
+      <div className={`layout${screen === 'lesson' ? ' lesson-focus' : ''}`}>
+        <aside className={`sidebar ${mobileNav ? 'is-open' : ''}`}>
+          <div className="side-mascot"><img src="/assets/logo.png" alt="Мово, волшебный помощник" /></div>
+          <div className="mascot-name">Мово</div>
+          <nav className="side-nav">
+            <NavItem label="Путь" active={activeTab === 'Путь'} onClick={() => go('Путь')} icon={<Footprints />} />
+            <NavItem label="Факультеты" active={activeTab === 'Факультеты'} onClick={() => go('Факультеты')} icon={<Sparkles />} />
+            <NavItem label="Задания" active={activeTab === 'Задания'} onClick={() => go('Задания')} icon={<Target />} />
+            <NavItem label="Награды" active={activeTab === 'Награды'} onClick={() => go('Награды')} icon={<Award />} />
+          </nav>
+          <div className="sidebar-bottom">
+            <div className="parent-card">
+              <strong>Для родителей</strong>
+              <span>Прогресс и домашние занятия</span>
+              <button onClick={() => go('Для родителей')}>Открыть <ArrowRight size={14} /></button>
+            </div>
+            <span className="sidebar-foot">Двигайся. Учись. Твори магию.</span>
+          </div>
+        </aside>
+        <main className="main-area" ref={mainRef}>
+          {screen === 'faculties' && <FacultiesScreen progress={progress} onOpen={openFaculty} />}
+          {screen === 'path' && (
+            <PathScreen
+              faculty={faculty}
+              progress={progress}
+              onLesson={(item) => openLesson(faculty, item)}
+              onOpenFaculty={openFaculty}
+            />
+          )}
+          {screen === 'tasks' && <TasksScreen progress={progress} onOpen={openLesson} />}
+          {screen === 'lesson' && lesson && (
+            <LessonScreen
+              key={lesson.id}
+              faculty={faculty}
+              lesson={lesson}
+              onBack={() => showScreen(() => { setScreen('path'); setActiveTab('Путь'); })}
+              onFinish={finishLesson}
+            />
+          )}
+          {screen === 'result' && result && (
+            <ResultScreen
+              result={result}
+              onContinue={() => showScreen(() => { setFacultyId(result.faculty.id); setScreen('path'); setActiveTab('Путь'); })}
+            />
+          )}
+          {screen === 'rewards' && <RewardsScreen stars={progress.stars} />}
+          {screen === 'parents' && <ParentsScreen doneToday={doneToday} streak={progress.streak} stars={progress.stars} />}
+        </main>
+        <RightRail
+          progress={progress}
+          doneToday={doneToday}
+          quest={work}
+          onQuest={() => openLesson(work.faculty, work.lesson)}
+        />
+      </div>
+      {mobileNav && <button className="nav-scrim" onClick={() => setMobileNav(false)} aria-label="Закрыть меню" />}
+    </div>
+  );
+}
+
+function NavItem({ label, active, onClick, icon }) {
+  return (
+    <button className={`nav-item ${active ? 'active' : ''}`} onClick={onClick}>
+      <span className="nav-icon">{icon}</span>
+      <span>{label}</span>
+      {active && <ChevronRight size={16} className="nav-chevron" />}
+    </button>
+  );
+}
+
+function FacultiesScreen({ progress, onOpen }) {
+  return (
+    <section className="content-page">
+      <div className="eyebrow"><Sparkles size={15} /> МИР MOVO</div>
+      <h1>Факультеты академии</h1>
+      <p className="page-subtitle">Каждый факультет открывает новый навык. Следующий откроется, когда пройдёшь предыдущий целиком.</p>
+      <div className="faculty-grid">
+        {faculties.map((item, index) => {
+          const state = facultyState(progress, index);
+          const done = lessonsDone(progress, item);
+          const label = state === 'locked' ? 'Закрыт' : state === 'done' ? 'Пройден' : done > 0 ? 'В процессе' : 'Открыт';
+          return (
+            <article key={item.id} className={`faculty-card ${state} ${state === 'locked' ? '' : 'is-open'}`} onClick={() => onOpen(item)}>
+              <div className="faculty-card-top">
+                <span className="faculty-number">{item.number}</span>
+                <span className="faculty-symbol">{item.symbol}</span>
+              </div>
+              <span className="faculty-card-kicker">{item.title}</span>
+              <h3>{item.course}</h3>
+              <div className="faculty-card-bottom">
+                <span className={`faculty-state ${state}`}>
+                  {state === 'locked' && <LockKeyhole size={13} />}
+                  {state === 'done' && <Check size={13} />}
+                  {state === 'active' && <span className="live-dot" />}
+                  {label}
+                </span>
+                {state !== 'locked' && (
+                  <button onClick={(event) => { event.stopPropagation(); onOpen(item); }}>
+                    {state === 'done' ? 'Ещё раз' : 'Продолжить'} <ArrowRight size={15} />
+                  </button>
+                )}
+              </div>
+            </article>
+          );
+        })}
+      </div>
+      <div className="feature-note">
+        <Shield size={19} />
+        <div>
+          <b>Твой комфорт — главное</b>
+          <span>Все упражнения можно выполнять в удобном для тебя темпе. Прогресс остаётся в этом браузере.</span>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function PathScreen({ faculty, progress, onLesson, onOpenFaculty }) {
+  const facultyIndex = faculties.findIndex((item) => item.id === faculty.id);
+  const done = lessonsDone(progress, faculty);
+  const total = faculty.lessons.length;
+  const current = faculty.lessons.find((_, index) => lessonState(progress, faculty, index) === 'current');
+  const nextFaculty = faculties[facultyIndex + 1];
+  const nextLocked = nextFaculty ? facultyState(progress, facultyIndex + 1) === 'locked' : false;
+  const spots = spotsFor(total);
+
+  return (
+    <div className="path-layout">
+      <section className="path-column">
+        <div className="eyebrow"><Sparkles size={15} /> {faculty.title.toUpperCase()}</div>
+        <div className="heading-row">
+          <div>
+            <h1>Твой путь движения</h1>
+            <p className="page-subtitle">{faculty.summary}</p>
+          </div>
+          <div className="level-chip"><span>УРОВЕНЬ {facultyIndex + 1}</span><b>✨</b></div>
+        </div>
+        <div className="course-hero">
+          <div className="course-badge"><img src="/assets/badge.svg" alt="" /><span>{faculty.symbol}</span></div>
+          <div className="course-info">
+            <span className="course-kicker">{faculty.kicker}</span>
+            <h2>{faculty.course}</h2>
+            <p>{done} из {total} {faculty.id === 'sides' ? 'уровней' : 'упражнений'}{done === total ? ' · курс пройден' : ` · осталось ${minutesLabel((total - done) * 2)}`}</p>
+            <div className="course-progress"><span style={{ width: `${(done / total) * 100}%` }} /></div>
+          </div>
+          <button className="continue-button" onClick={() => onLesson(current ?? faculty.lessons[0])}>
+            <Play size={16} fill="currentColor" /> {current ? 'Продолжить' : 'Ещё раз'}
+          </button>
+        </div>
+        <div className="lesson-map-wrap">
+          <div className="map-caption">
+            <span><span className="live-dot" /> ТВОЙ МАРШРУТ</span>
+            <span>{done} из {total} {faculty.id === 'sides' ? 'уровней' : 'упражнений'} пройдено</span>
+          </div>
+          <div className={`lesson-map compact lessons-${total}`}>
+            <svg className="map-path" viewBox="0 0 520 560" preserveAspectRatio="none" aria-hidden="true">
+              <path d="M250 36 C170 90 110 140 160 210 C220 290 390 250 350 340 C300 440 120 430 190 520" fill="none" stroke="#b8dfc7" strokeWidth="12" strokeLinecap="round" />
+            </svg>
+            <div className="path-start"><span>✦</span><b>Курс начинается здесь</b><small>Каждый шаг — новое движение</small></div>
+            {faculty.lessons.map((item, index) => {
+              const state = lessonState(progress, faculty, index);
+              return (
+                <button
+                  key={item.id}
+                  disabled={state === 'locked'}
+                  onClick={() => onLesson(item)}
+                  className={`lesson-stop ${state}`}
+                  style={spots[index]}
+                  aria-label={`${index + 1}. ${item.title}${state === 'locked' ? ', закрыто' : ''}`}
+                >
+                  <span className="stop-core">{state === 'done' ? <Check /> : state === 'locked' ? <LockKeyhole /> : item.icon}</span>
+                  <span className="stop-label"><b>{faculty.id === 'sides' ? `УРОВЕНЬ ${index + 1}` : `УПРАЖНЕНИЕ ${index + 1}`}</b><small>{item.title}</small></span>
+                </button>
+              );
+            })}
+            <div className="map-reward">
+              <div className="chest">🎁</div>
+              <div><b>Сундук академии</b><small>{done === total ? 'Факультет пройден' : 'Откроется после курса'}</small></div>
+              {done === total ? <Check size={16} /> : <LockKeyhole size={16} />}
+            </div>
+          </div>
+        </div>
+        {nextFaculty && (
+          <section className="next-faculty">
+            <div>
+              <span className="eyebrow">СЛЕДУЮЩАЯ ОСТАНОВКА</span>
+              <h3>{nextFaculty.title}</h3>
+              <p>{nextFaculty.summary}</p>
+            </div>
+            <div className="faculty-glyph">{nextFaculty.symbol}</div>
+            {nextLocked ? <span className="coming-soon">ОТКРОЕТСЯ ПОСЛЕ КУРСА</span> : (
+              <button className="continue-button next-open" onClick={() => onOpenFaculty(nextFaculty)}>Открыть факультет</button>
+            )}
+          </section>
+        )}
+      </section>
+    </div>
+  );
+}
+
+function spotsFor(count) {
+  if (count <= 1) return [{ left: '38%', top: '42%' }];
+  if (count === 2) return [{ left: '16%', top: '28%' }, { left: '52%', top: '66%' }];
+  return [{ left: '12%', top: '16%' }, { left: '54%', top: '42%' }, { left: '22%', top: '70%' }];
+}
+
+function RightRail({ progress, doneToday, quest, onQuest }) {
+  const todayIndex = (new Date().getDay() + 6) % 7;
+  const hitDays = new Set();
+  for (let offset = 0; offset < Math.min(progress.streak, 7); offset += 1) {
+    hitDays.add((todayIndex - offset + 7) % 7);
+  }
+  return (
+    <aside className="right-rail">
+      <section className="rail-card goal-card">
+        <div className="rail-heading">
+          <div>
+            <span className="rail-overline">ТВОЯ ЦЕЛЬ</span>
+            <h3>Маленький шаг<br />каждый день</h3>
+          </div>
+          <div className="goal-icon"><Target size={20} /></div>
+        </div>
+        <p className="rail-muted">{Math.min(doneToday, 2)} из 2 уроков завершено</p>
+        <div className="rail-progress"><span style={{ width: `${Math.min(doneToday, 2) * 50}%` }} /></div>
+        <div className="quest-card">
+          <div>
+            <span>ТЕКУЩЕЕ ЗАДАНИЕ</span>
+            <b>{quest.lesson.title}</b>
+          </div>
+          <div className="reward-token">+{STAR_REWARD}</div>
+          <button onClick={onQuest} aria-label="Начать текущее задание"><ChevronRight /></button>
+        </div>
+      </section>
+      <section className="rail-card streak-card">
+        <div className="section-title">
+          <h3>Серия занятий</h3>
+          <span className="streak-count"><Flame size={14} fill="currentColor" /> {progress.streak}</span>
+        </div>
+        <div className="week-dots">
+          {DAY_LABELS.map((day, index) => (
+            <div className="day" key={day}>
+              <span className={index === todayIndex ? 'today' : hitDays.has(index) ? 'hit' : ''}>
+                {index === todayIndex ? <Flame size={13} fill="currentColor" /> : hitDays.has(index) ? <Check size={14} /> : ''}
+              </span>
+              <small>{day}</small>
+            </div>
+          ))}
+        </div>
+      </section>
+      <section className="rail-card skills-card">
+        <div className="section-title">
+          <div>
+            <span className="rail-overline">ТВОИ УСПЕХИ</span>
+            <h3>Навыки недели</h3>
+          </div>
+        </div>
+        <Skill name="Лево / право" value={`${lessonsDone(progress, faculties[0])} / ${faculties[0].lessons.length}`} progress={(lessonsDone(progress, faculties[0]) / faculties[0].lessons.length) * 100} color="green" />
+        <Skill name="Координация" value={`${lessonsDone(progress, faculties[1])} / ${faculties[1].lessons.length}`} progress={(lessonsDone(progress, faculties[1]) / faculties[1].lessons.length) * 100} color="blue" />
+        <Skill name="Звёзды" value={`${progress.stars}`} progress={Math.min(100, progress.stars / 2)} color="yellow" />
+        <div className="coach-tip"><span>💡</span><p><b>Совет Мово</b>Занимайся по 5 минут каждый день — так навык становится увереннее.</p></div>
+      </section>
+      <div className="privacy-note"><Shield size={15} /><span>Камера нужна только во время урока</span></div>
+    </aside>
+  );
+}
+
+function Skill({ name, value, progress, color }) {
+  return (
+    <div className={`skill-row ${color}`}>
+      <span className="skill-dot" />
+      <div className="skill-content">
+        <div><b>{name}</b><strong>{value}</strong></div>
+        <div className="skill-track"><span style={{ width: `${progress}%` }} /></div>
+      </div>
+    </div>
+  );
+}
+
+function LessonScreen({ faculty, lesson, onBack, onFinish }) {
+  const lessonIndex = faculty.lessons.findIndex((item) => item.id === lesson.id);
+  const steps = lesson.steps;
+  const [phase, setPhase] = useState('prep');
+  const [stepIndex, setStepIndex] = useState(0);
+  const [cameraOn, setCameraOn] = useState(false);
+  const [modal, setModal] = useState(false);
+  const [live, setLive] = useState(null);
+  const [hold, setHold] = useState(0);
+  const [poseReady, setPoseReady] = useState(false);
+  const [poseFailed, setPoseFailed] = useState(false);
+  const [bossPose, setBossPose] = useState('left-arm');
+  const [bossSerial, setBossSerial] = useState(0);
+  const [bossLeft, setBossLeft] = useState(30000);
+  const [bossScore, setBossScore] = useState(0);
+  const [praising, setPraising] = useState(false);
+  const [seqStage, setSeqStage] = useState('memorize');
+  const [revealCount, setRevealCount] = useState(0);
+  const [seqClock, setSeqClock] = useState(0);
+  const [seqGrade, setSeqGrade] = useState('');
+  const [stableHint, setStableHint] = useState('');
+  const mode = lesson.mode || 'steps';
+  const bossMode = mode === 'boss';
+  const videoRef = useRef(null);
+  const canvasRef = useRef(null);
+  const streamRef = useRef(null);
+  const landmarkerRef = useRef(null);
+  const phaseRef = useRef(phase);
+  const stepRef = useRef(stepIndex);
+  const stepsRef = useRef(steps);
+  const advanceRef = useRef(() => {});
+  const hitRef = useRef(() => {});
+  const engineRef = useRef({});
+  const onFinishRef = useRef(onFinish);
+  const startedAt = useRef(null);
+  const modeRef = useRef(mode);
+  const busyRef = useRef(false);
+  const bossPoseRef = useRef('left-arm');
+  const bossSerialRef = useRef(0);
+  const bossScoreRef = useRef(0);
+  const bossEndsAt = useRef(0);
+  const bossTimer = useRef(0);
+  const bossPace = useRef(0);
+  const finishedRef = useRef(false);
+  const missLatch = useRef(false);
+  const seqStageRef = useRef('memorize');
+  const seqClockStart = useRef(0);
+  const gradesRef = useRef([]);
+
+  phaseRef.current = phase;
+  stepRef.current = bossMode ? bossSerial : stepIndex;
+  stepsRef.current = steps;
+  modeRef.current = mode;
+  bossPoseRef.current = bossPose;
+  onFinishRef.current = onFinish;
+  seqStageRef.current = seqStage;
+  const step = steps[stepIndex] || steps[0];
+
   const stopCamera = () => {
-    streamRef.current?.getTracks().forEach(track => track.stop());
+    streamRef.current?.getTracks().forEach((track) => track.stop());
     streamRef.current = null;
     setCameraOn(false);
   };
-  useEffect(() => () => streamRef.current?.getTracks().forEach(track => track.stop()), []);
-  useEffect(() => { if (cameraOn && videoRef.current && streamRef.current) videoRef.current.srcObject = streamRef.current; }, [cameraOn]);
+
+  useEffect(() => () => {
+    streamRef.current?.getTracks().forEach((track) => track.stop());
+    landmarkerRef.current?.close?.();
+  }, []);
+
+  useEffect(() => {
+    if (cameraOn && videoRef.current && streamRef.current) videoRef.current.srcObject = streamRef.current;
+  }, [cameraOn, phase]);
+
+  useEffect(() => {
+    if (phase === 'practice' && !startedAt.current) startedAt.current = Date.now();
+  }, [phase]);
+
+  const advance = () => {
+    const index = stepRef.current;
+    const all = stepsRef.current;
+    if (index + 1 >= all.length) {
+      onFinish({ moves: all.length, seconds: Date.now() - (startedAt.current || Date.now()) });
+      return;
+    }
+    setStepIndex(index + 1);
+    setHold(0);
+    setLive(null);
+  };
+  advanceRef.current = advance;
+
+  const praiseThenAdvance = () => {
+    if (busyRef.current || finishedRef.current) return;
+    busyRef.current = true;
+    setPraising(true);
+    window.setTimeout(() => {
+      busyRef.current = false;
+      setPraising(false);
+      advance();
+    }, 1300);
+  };
+
+  const beginRecall = () => {
+    seqClockStart.current = Date.now();
+    setSeqClock(0);
+    setSeqGrade('');
+    setSeqStage('play');
+    seqStageRef.current = 'play';
+  };
+
+  const onSequenceHit = () => {
+    if (busyRef.current || finishedRef.current || seqStageRef.current !== 'play') return;
+    busyRef.current = true;
+    setPraising(true);
+    const index = stepRef.current;
+    const all = stepsRef.current;
+    const current = all[index];
+    const next = all[index + 1];
+    const roundDone = !next || next.round !== current.round;
+    window.setTimeout(() => {
+      setPraising(false);
+      setHold(0);
+      setLive(null);
+      if (!roundDone) {
+        busyRef.current = false;
+        setStepIndex(index + 1);
+        return;
+      }
+      const elapsed = Date.now() - seqClockStart.current;
+      const moves = all.filter((item) => item.round === current.round).length;
+      const grade = gentleGrade(elapsed, moves);
+      gradesRef.current = [...gradesRef.current, grade];
+      setSeqGrade(grade);
+      setSeqClock(elapsed);
+      setSeqStage('mark');
+      seqStageRef.current = 'mark';
+      window.setTimeout(() => {
+        busyRef.current = false;
+        if (!next) {
+          onFinishRef.current({
+            moves: all.length,
+            seconds: Date.now() - (startedAt.current || Date.now()),
+            grades: gradesRef.current,
+          });
+          return;
+        }
+        setStepIndex(index + 1);
+        setRevealCount(0);
+        setSeqStage('memorize');
+        seqStageRef.current = 'memorize';
+      }, 1800);
+    }, 700);
+  };
+
+  const armBoss = (previous) => {
+    if (finishedRef.current || phaseRef.current !== 'practice') return;
+    const other = previous === 'left-arm' ? 'right-arm' : 'left-arm';
+    let next = Math.random() < 0.7 ? other : (previous || other);
+    if (!previous) next = Math.random() < 0.5 ? 'left-arm' : 'right-arm';
+    const serial = bossSerialRef.current + 1;
+    bossSerialRef.current = serial;
+    bossPoseRef.current = next;
+    setBossSerial(serial);
+    setBossPose(next);
+    const windows = [1500, 1200, 1000, 800, 700];
+    const wait = windows[Math.min(bossPace.current, windows.length - 1)];
+    bossPace.current += 1;
+    window.clearTimeout(bossTimer.current);
+    bossTimer.current = window.setTimeout(() => armBoss(next), wait);
+  };
+
+  const finishBoss = () => {
+    if (finishedRef.current) return;
+    finishedRef.current = true;
+    window.clearTimeout(bossTimer.current);
+    onFinishRef.current({
+      moves: bossScoreRef.current,
+      seconds: 30000,
+      boss: true,
+      correct: bossScoreRef.current,
+    });
+  };
+
+  const onBossHit = () => {
+    if (busyRef.current || finishedRef.current) return;
+    busyRef.current = true;
+    window.clearTimeout(bossTimer.current);
+    const nextScore = bossScoreRef.current + 1;
+    bossScoreRef.current = nextScore;
+    setBossScore(nextScore);
+    setPraising(true);
+    window.setTimeout(() => {
+      if (finishedRef.current) return;
+      busyRef.current = false;
+      setPraising(false);
+      armBoss(bossPoseRef.current);
+    }, 650);
+  };
+
+  engineRef.current.arm = armBoss;
+  engineRef.current.miss = () => {
+    if (busyRef.current || finishedRef.current) return;
+    bossEndsAt.current = Math.max(Date.now() + 1000, bossEndsAt.current - 1000);
+  };
+  engineRef.current.finish = finishBoss;
+  hitRef.current = () => {
+    if (modeRef.current === 'boss') onBossHit();
+    else if (modeRef.current === 'sequence') {
+      if (seqStageRef.current === 'memorize') beginRecall();
+      else if (seqStageRef.current === 'play') onSequenceHit();
+    } else if (modeRef.current === 'intro') praiseThenAdvance();
+    else advance();
+  };
+
+  useEffect(() => {
+    if (phase !== 'practice' || lesson.mode !== 'boss') return undefined;
+    finishedRef.current = false;
+    busyRef.current = false;
+    bossScoreRef.current = 0;
+    bossPace.current = 0;
+    bossSerialRef.current = 0;
+    setBossScore(0);
+    setBossLeft(30000);
+    setPraising(false);
+    bossEndsAt.current = Date.now() + 30000;
+    engineRef.current.arm(null);
+    const id = window.setInterval(() => {
+      const left = bossEndsAt.current - Date.now();
+      setBossLeft(Math.max(0, left));
+      if (left <= 0) engineRef.current.finish();
+    }, 200);
+    return () => {
+      window.clearInterval(id);
+      window.clearTimeout(bossTimer.current);
+    };
+  }, [phase, lesson.id, lesson.mode]);
+
+  useEffect(() => {
+    if (phase !== 'practice' || lesson.mode !== 'sequence' || seqStage !== 'memorize') return undefined;
+    const round = lesson.steps[stepIndex]?.round;
+    const count = lesson.steps.filter((item) => item.round === round).length;
+    setRevealCount(1);
+    const timers = [];
+    for (let index = 1; index < count; index += 1) {
+      timers.push(window.setTimeout(() => setRevealCount(index + 1), index * 1400));
+    }
+    timers.push(window.setTimeout(() => {
+      seqClockStart.current = Date.now();
+      setSeqClock(0);
+      setSeqStage('play');
+    }, count * 1400 + 2200));
+    return () => timers.forEach((timer) => window.clearTimeout(timer));
+  }, [phase, lesson.id, lesson.mode, lesson.steps, seqStage, stepIndex]);
+
+  useEffect(() => {
+    if (seqStage !== 'play') return undefined;
+    const id = window.setInterval(() => setSeqClock(Date.now() - seqClockStart.current), 200);
+    return () => window.clearInterval(id);
+  }, [seqStage]);
+
+  useEffect(() => {
+    if (!cameraOn) return undefined;
+    let dead = false;
+    let raf = 0;
+    let lastUi = 0;
+    let holdStart = 0;
+    let fired = false;
+    let armedStep = -1;
+    let lastVideoTime = -1;
+
+    const tick = () => {
+      raf = requestAnimationFrame(tick);
+      const marker = landmarkerRef.current;
+      const video = videoRef.current;
+      if (!marker || !video || video.readyState < 2) return;
+      if (video.currentTime === lastVideoTime) return;
+      lastVideoTime = video.currentTime;
+      const timestamp = performance.now();
+      let points = null;
+      try {
+        points = marker.detectForVideo(video, timestamp)?.landmarks?.[0] ?? null;
+      } catch {
+        return;
+      }
+
+      const phaseNow = phaseRef.current;
+      const index = modeRef.current === 'boss' ? bossSerialRef.current : stepRef.current;
+      if (modeRef.current === 'sequence' && seqStageRef.current !== 'play') {
+        drawPose(canvasRef.current, points, video, { error: false });
+        return;
+      }
+      if (armedStep !== index) {
+        armedStep = index;
+        fired = false;
+        holdStart = 0;
+        missLatch.current = false;
+      }
+      const current = modeRef.current === 'boss'
+        ? { pose: bossPoseRef.current }
+        : stepsRef.current[index];
+      if (phaseNow === 'prep' || !current?.pose) {
+        const framed = frameStatus(points);
+        drawPose(canvasRef.current, points, video, { error: !framed.ok });
+        if (timestamp - lastUi > 160) {
+          lastUi = timestamp;
+          setLive(framed);
+        }
+        return;
+      }
+
+      const verdict = evaluatePose(points, current.pose);
+      drawPose(canvasRef.current, points, video, { error: !verdict.ok });
+      if (verdict.ok) {
+        if (!holdStart) holdStart = timestamp;
+        const holdMs = modeRef.current === 'boss' ? 280 : HOLD_MS;
+        const ratio = Math.min(1, (timestamp - holdStart) / holdMs);
+        if (timestamp - lastUi > 80) {
+          lastUi = timestamp;
+          setHold(ratio);
+          setLive(verdict);
+        }
+        if (ratio >= 1 && !fired && !busyRef.current) {
+          fired = true;
+          holdStart = 0;
+          hitRef.current();
+        }
+        return;
+      }
+      holdStart = 0;
+      const wrongSide = /а нужна/.test(verdict.message || '');
+      if (wrongSide && !missLatch.current && !busyRef.current && modeRef.current === 'boss') {
+        missLatch.current = true;
+        engineRef.current.miss?.();
+      }
+      if (!wrongSide) missLatch.current = false;
+      if (timestamp - lastUi > 160) {
+        lastUi = timestamp;
+        setHold(0);
+        setLive(verdict);
+      }
+    };
+
+    const timer = window.setTimeout(() => {
+      if (!dead && !landmarkerRef.current) setPoseFailed(true);
+    }, 12000);
+    createPoseLandmarker()
+      .then((marker) => {
+        window.clearTimeout(timer);
+        if (dead) {
+          marker.close?.();
+          return;
+        }
+        landmarkerRef.current = marker;
+        setPoseReady(true);
+        setPoseFailed(false);
+      })
+      .catch(() => {
+        window.clearTimeout(timer);
+        if (!dead) setPoseFailed(true);
+      });
+
+    raf = requestAnimationFrame(tick);
+    return () => {
+      dead = true;
+      window.clearTimeout(timer);
+      cancelAnimationFrame(raf);
+      landmarkerRef.current?.close?.();
+      landmarkerRef.current = null;
+      setPoseReady(false);
+    };
+  }, [cameraOn]);
 
   const startCamera = async () => {
-    if (!navigator.mediaDevices?.getUserMedia) { setCameraOn(false); setModal(true); return; }
+    if (!navigator.mediaDevices?.getUserMedia) {
+      setModal(true);
+      return;
+    }
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user' }, audio: false });
       streamRef.current = stream;
       setCameraOn(true);
-    } catch { setCameraOn(false); setModal(true); }
+      setPoseFailed(false);
+    } catch {
+      setCameraOn(false);
+      setModal(true);
+    }
   };
 
-  const launchLesson = (index = lessonIndex) => { setLessonIndex(index); setScreen('lesson'); setActiveTab('Путь'); window.scrollTo({ top: 0, behavior: 'smooth' }); };
-  const finishLesson = () => {
-    stopCamera();
-    setDoneToday(n => Math.min(n + 1, 2));
-    setCompletedLessons(n => Math.min(n + 1, 3));
-    setLessonIndex(i => Math.min(i + 1, 2));
-    setScreen('result');
-  };
-  const go = (tab) => {
-    setActiveTab(tab); setMobileNav(false);
-    if (tab === 'Путь') setScreen('path');
-    else if (tab === 'Факультеты') setScreen('faculties');
-    else if (tab === 'Задания') setScreen('tasks');
-    else if (tab === 'Награды') setScreen('rewards');
-    else if (tab === 'Для родителей') setScreen('parents');
-  };
+  const activePose = bossMode ? bossPose : step.pose;
+  const command = bossMode ? (bossPose === 'left-arm' ? 'Лево!' : 'Право!') : step.prompt;
+  const roundSteps = mode === 'sequence' ? steps.filter((item) => item.round === step.round) : [];
+  const indexInRound = Math.max(0, roundSteps.indexOf(step));
+  const prepTask = mode === 'sequence' ? 'Запомни порядок' : mode === 'boss' ? 'Лево или право' : steps[0].prompt;
+  const taskTitle = mode === 'sequence'
+    ? (seqStage === 'memorize' ? 'Запомни порядок' : seqStage === 'mark' ? (seqGrade || 'Молодец') : 'Повтори')
+    : command;
+  const taskDetail = mode === 'sequence'
+    ? (seqStage === 'memorize'
+      ? 'Смотри на порядок. Через несколько секунд повторишь его по памяти.'
+      : seqStage === 'mark'
+        ? gentleNote(seqGrade || 'Молодец', seqClock)
+        : `Движение ${indexInRound + 1} из ${roundSteps.length}. Время идёт спокойно.`)
+    : step.detail;
+  const manualAllowed = (!cameraOn || !activePose || poseFailed) && seqStage !== 'mark';
+  const bar = bossMode
+    ? Math.max(0, (bossLeft / 30000) * 100)
+    : Math.max(8, ((stepIndex + (cameraOn && step.pose && !poseFailed && mode !== 'sequence' ? hold : 0)) / steps.length) * 100);
+  const hintError = Boolean(live && !live.ok && !praising && !(mode === 'sequence' && seqStage !== 'play'));
+  const spoken = phase === 'prep'
+    ? prepTask
+    : mode === 'sequence'
+      ? (seqStage === 'play' ? 'Повтори' : seqStage === 'mark' ? (seqGrade || 'Молодец') : '')
+      : praising
+        ? 'Правильно!'
+        : (bossMode ? (bossSerial > 0 ? command : '') : step.prompt);
+  const levelWord = faculty.id === 'sides' ? 'УРОВЕНЬ' : 'УПРАЖНЕНИЕ';
+  const practiceLead = bossMode
+    ? 'Тридцать секунд. Повторяй сторону, которую называет Мово.'
+    : mode === 'sequence'
+      ? 'Сначала последовательность на экране, потом ты повторяешь её. Оценка по времени, без спешки.'
+      : mode === 'intro'
+        ? 'Сначала левая, потом правая, потом обе.'
+        : 'Посмотри на Мово и повторяй движения в своём темпе.';
+  const showHint = Boolean(stableHint) && !praising && phase === 'practice' && !(mode === 'sequence' && seqStage !== 'play');
+  const [mascotState, setMascotState] = useState('idle');
 
-  return <div className="app-shell">
-    <header className="topbar">
-      <button className="mobile-menu icon-button" onClick={() => setMobileNav(!mobileNav)} aria-label="Открыть меню"><Menu size={22}/></button>
-      <button className="brand" onClick={() => go('Путь')}><img src="/assets/logo.png" alt=""/><span className="brand-name">Movo</span><span className="brand-caption">академия движения</span></button>
-      <div className="top-spacer"/>
-      <div className="top-pill"><Flame size={18} fill="#ffd450" stroke="#ffd450"/><span>{streak} дней</span></div>
-      <div className="top-pill"><Star size={18} fill="#5bd0f5" stroke="#5bd0f5"/><span>{320 + (doneToday - 1) * 20}</span></div>
-      <button className="profile" aria-label="Профиль">Л</button>
-    </header>
-    <div className="layout">
-      <aside className={`sidebar ${mobileNav ? 'is-open' : ''}`}>
-        <div className="side-mascot"><img src="/assets/logo.png" alt="Мово, волшебный помощник"/></div>
-        <div className="mascot-name">Мово</div>
-        <nav className="side-nav">
-          <NavItem label="Путь" active={activeTab === 'Путь'} onClick={() => go('Путь')} icon={<Footprints/>}/>
-          <NavItem label="Факультеты" active={activeTab === 'Факультеты'} onClick={() => go('Факультеты')} icon={<Sparkles/>}/>
-          <NavItem label="Задания" active={activeTab === 'Задания'} onClick={() => go('Задания')} icon={<Target/>}/>
-          <NavItem label="Награды" active={activeTab === 'Награды'} onClick={() => go('Награды')} icon={<Award/>}/>
-        </nav>
-        <div className="sidebar-bottom"><div className="parent-card"><strong>Для родителей</strong><span>Прогресс и домашние занятия</span><button onClick={() => go('Для родителей')}>Открыть <ArrowRight size={14}/></button></div><span className="sidebar-foot">Двигайся. Учись. Твори магию.</span></div>
-      </aside>
-      <main className="main-area">
-        {screen === 'path' && <PathScreen onStart={() => launchLesson(Math.min(completedLessons, 2))} onLesson={launchLesson} doneToday={doneToday} completedLessons={completedLessons}/>}
-        {screen === 'lesson' && <LessonScreen lesson={lesson} lessonIndex={lessonIndex} cameraOn={cameraOn} videoRef={videoRef} onStartCamera={startCamera} onStopCamera={stopCamera} onFinish={finishLesson} onBack={() => { stopCamera(); setScreen('path'); }}/>} 
-        {screen === 'result' && <ResultScreen onContinue={() => setScreen('path')} lesson={lessons[Math.max(0, lessonIndex - 1)]}/>}
-        {screen === 'faculties' && <FacultiesScreen onStart={() => launchLesson(Math.min(completedLessons, 2))}/>}
-        {screen === 'tasks' && <TasksScreen onStart={() => launchLesson(Math.min(completedLessons, 2))} doneToday={doneToday}/>}
-        {screen === 'rewards' && <RewardsScreen/>}
-        {screen === 'parents' && <ParentsScreen doneToday={doneToday} streak={streak}/>}
-      </main>
-      {(screen === 'path' || screen === 'faculties') && <RightRail doneToday={doneToday} onQuest={() => launchLesson(Math.min(completedLessons, 2))}/>}
-    </div>
-    {modal && <div className="modal-backdrop" onClick={() => setModal(false)}><div className="modal" onClick={e => e.stopPropagation()}><button className="modal-close" onClick={() => setModal(false)}><X size={18}/></button><div className="modal-icon"><CircleHelp/></div><h3>Камера пока недоступна</h3><p>Разреши доступ к камере в настройках браузера. А пока можешь пройти урок в демо-режиме.</p><button className="primary-button" onClick={() => { setModal(false); }}>Хорошо, понятно</button></div></div>}
-    {mobileNav && <button className="nav-scrim" onClick={() => setMobileNav(false)} aria-label="Закрыть меню"/>}
-  </div>;
-}
+  useEffect(() => {
+    if (praising || !live?.message || live.ok || phase !== 'practice' || (mode === 'sequence' && seqStage !== 'play')) {
+      setStableHint('');
+      return undefined;
+    }
+    const message = live.message;
+    const timer = window.setTimeout(() => setStableHint(message), 420);
+    return () => window.clearTimeout(timer);
+  }, [live?.message, live?.ok, praising, phase, mode, seqStage]);
 
-function NavItem({ label, active, onClick, icon }) { return <button className={`nav-item ${active ? 'active' : ''}`} onClick={onClick}><span className="nav-icon">{icon}</span><span>{label}</span>{active && <ChevronRight size={16} className="nav-chevron"/>}</button>; }
+  useEffect(() => {
+    resetSpeech();
+    return () => resetSpeech();
+  }, [phase, stepIndex, bossSerial]);
 
-function PathScreen({ onStart, onLesson, doneToday, completedLessons }) {
-  const progress = completedLessons;
-  return <div className="path-layout">
-    <section className="path-column">
-      <div className="eyebrow"><Sparkles size={15}/> ФАКУЛЬТЕТ СТОРОН</div>
-      <div className="heading-row"><div><h1>Твой путь движения</h1><p className="page-subtitle">Короткие уроки помогают различать лево и право,<br className="desktop-only"/> двигаться точнее и увереннее.</p></div><div className="level-chip"><span>УРОВЕНЬ 1</span><b>✨</b></div></div>
-      <div className="course-hero">
-        <div className="course-badge"><img src="/assets/badge.svg" alt=""/><span>↔</span></div>
-        <div className="course-info"><span className="course-kicker">КУРС 1 · ОСНОВЫ ДВИЖЕНИЯ</span><h2>Лево и право</h2><p>{progress} из 3 упражнений · осталось {Math.max(2, (3-progress)*2)} минуты</p><div className="course-progress"><span style={{width:`${(progress/3)*100}%`}}/></div></div>
-        <button className="continue-button" onClick={onStart}><Play size={16} fill="currentColor"/> Продолжить</button>
+  useEffect(() => {
+    speakRu(spoken);
+  }, [spoken, phase, stepIndex, bossSerial, seqStage]);
+
+  useEffect(() => {
+    if (phase !== 'practice' || mode !== 'sequence' || seqStage !== 'memorize') return;
+    const item = steps.filter((entry) => entry.round === step.round)[revealCount - 1];
+    if (item) speakRu(item.prompt);
+  }, [phase, mode, seqStage, revealCount, step.round, steps]);
+
+  useEffect(() => {
+    if (!showHint || !stableHint) return;
+    speakRu(stableHint);
+  }, [showHint, stableHint]);
+
+  useEffect(() => {
+    if (phase !== 'practice') {
+      setMascotState('idle');
+      return;
+    }
+    if (mode === 'sequence' && seqStage === 'memorize') {
+      const shown = steps.filter((entry) => entry.round === step.round)[Math.max(0, revealCount - 1)];
+      if (shown?.pose === 'left-arm') setMascotState('raiseLeft');
+      else if (shown?.pose === 'right-arm') setMascotState('raiseRight');
+      else setMascotState('idle');
+      return;
+    }
+    if (mode === 'sequence' && seqStage === 'play' && !praising) {
+      if (hintError && /а нужна/.test(live?.message || '')) setMascotState('error');
+      else setMascotState('idle');
+      return;
+    }
+    if (praising || (mode === 'steps' && live?.ok)) {
+      setMascotState('success');
+      return;
+    }
+    if (hintError && /рука/.test(live?.message || '') && /не |а нужна/.test(live?.message || '')) {
+      setMascotState('error');
+      return;
+    }
+    if (activePose === 'left-arm') setMascotState('raiseLeft');
+    else if (activePose === 'right-arm') setMascotState('raiseRight');
+    else if (activePose === 'both-arms') setMascotState('bothHands');
+    else setMascotState('idle');
+  }, [phase, activePose, live?.ok, live?.message, hintError, praising, mode, seqStage, revealCount, step.round, steps]);
+
+  return (
+    <section className="lesson-page">
+      <button className="back-link" onClick={() => { stopCamera(); onBack(); }}><ArrowLeft size={17} /> Вернуться на дорожку</button>
+      <div className="lesson-topline">
+        <span className="eyebrow"><Sparkles size={15} /> {faculty.title.toUpperCase()}</span>
+        <span className="lesson-number">{levelWord} {lessonIndex + 1} ИЗ {faculty.lessons.length}</span>
       </div>
-      <div className="lesson-map-wrap"><div className="map-caption"><span><span className="live-dot"/> ТВОЙ МАРШРУТ</span><span>{completedLessons} из 3 упражнений пройдено</span></div>
-        <div className="lesson-map">
-          <svg className="map-path" viewBox="0 0 520 835" preserveAspectRatio="none" aria-hidden="true"><path d="M222 32 C190 64 118 86 114 132 C107 179 245 202 257 263 C267 321 173 336 153 397 C135 452 265 481 275 543 C285 599 177 617 166 675 C155 727 264 744 286 811" fill="none" stroke="#b8dfc7" strokeWidth="12" strokeLinecap="round" strokeDasharray="1 0"/></svg>
-          <div className="path-start"><span>✦</span><b>Курс начинается здесь</b><small>Каждый шаг — новое движение</small></div>
-          {lessons.map((l, i) => { const available = i < completedLessons || i === completedLessons && i < 3; const completed = i < completedLessons; const state = completed ? 'done' : available ? 'current' : l.state === 'boss' ? 'boss' : 'locked'; return <button key={l.id} onClick={() => available && onLesson(i)} className={`lesson-stop stop-${i+1} ${state}`} aria-label={`${l.id}. ${l.title}${!available ? ', закрыто' : ''}`}><span className="stop-core">{completed ? <Check/> : state === 'locked' ? <LockKeyhole/> : l.icon}</span><span className="stop-label"><b>{i < 3 ? `УПРАЖНЕНИЕ ${i+1}` : l.id === 8 ? 'ФИНАЛЬНОЕ ИСПЫТАНИЕ' : `${l.id} · ${l.title}`}</b><small>{l.title}</small></span></button>; })}
-          <div className="map-reward"><div className="chest">🎁</div><div><b>Сундук академии</b><small>Открой после испытания</small></div><LockKeyhole size={16}/></div>
+      <div className="lesson-title-row">
+        <div>
+          <h1>{phase === 'prep' ? 'Приготовимся двигаться!' : lesson.title}</h1>
+          <p className="page-subtitle">{phase === 'prep' ? 'Разреши камеру и встань в рамку. Видео остаётся на этом устройстве.' : practiceLead}</p>
+        </div>
+        <div className="timer-pill"><Clock3 size={16} /> {bossMode && phase === 'practice' ? formatTime(bossLeft) : mode === 'sequence' && phase === 'practice' && seqStage !== 'memorize' ? formatTime(seqClock) : lesson.minutes}</div>
+      </div>
+      {phase === 'practice' && <div className="lesson-progress"><span style={{ width: `${bar}%` }} /></div>}
+      <div className="practice-grid">
+        <div className={`camera-stage ${cameraOn ? 'camera-on' : ''}`}>
+          {cameraOn ? <video ref={videoRef} autoPlay playsInline muted /> : (
+            <div className="camera-placeholder">
+              <div className="camera-orbit orbit-one" />
+              <div className="camera-orbit orbit-two" />
+              <div className="camera-person">
+                <div className="person-head" />
+                <div className="person-body" />
+                <div className="person-arm left-arm" />
+                <div className="person-arm right-arm" />
+              </div>
+              <div className="camera-mascot"><img src="/assets/logo.png" alt="Мово" /></div>
+            </div>
+          )}
+          <canvas ref={canvasRef} className="pose-canvas" />
+          <div className="frame-guide" />
+          <div className="camera-label"><span className={cameraOn ? 'cam-live' : ''} />{cameraOn ? 'КАМЕРА ВКЛЮЧЕНА' : 'ПРЕДПРОСМОТР УРОКА'}</div>
+          {showHint && <div className="screen-hint">{stableHint}</div>}
+          {praising && phase === 'practice' && mode !== 'sequence' && <div className="screen-hint ok">Правильно!</div>}
+          <div className="camera-controls">
+            <button className="camera-control" onClick={cameraOn ? stopCamera : startCamera}>{cameraOn ? 'Выключить камеру' : 'Включить камеру'}</button>
+            <span>Изображение остаётся на устройстве</span>
+          </div>
+        </div>
+        <div className="coach-panel">
+          <Mascot state={mascotState} />
+          {phase === 'prep' ? (
+            <>
+              <div className="coach-bubble">
+                <span className="bubble-kicker">ЗАДАНИЕ</span>
+                <h2>{prepTask}</h2>
+                <p>{mode === 'sequence' ? 'Сначала Мово покажет порядок на несколько секунд. Потом ты повторишь его по памяти.' : mode === 'boss' ? 'Мово будет называть сторону. Повторяй её.' : steps[0].detail}</p>
+              </div>
+              <ul className="prep-list">
+                <li><Check size={16} /> Камера смотрит на тебя</li>
+                <li><Check size={16} /> Видно всё тело до пояса</li>
+                <li><Check size={16} /> Рядом есть место для рук</li>
+              </ul>
+              {!cameraOn && <button className="primary-button practice-button" onClick={startCamera}>Разрешить камеру <ArrowRight size={17} /></button>}
+              {cameraOn && <button className="primary-button practice-button" onClick={() => setPhase('practice')}>Я в кадре <ArrowRight size={17} /></button>}
+              <button className="secondary-button" onClick={() => { stopCamera(); setPhase('practice'); }}>Пройти без камеры</button>
+            </>
+          ) : (
+            <>
+              <div className="coach-bubble">
+                <span className="bubble-kicker">{bossMode ? `ПРАВИЛЬНЫХ: ${bossScore}` : mode === 'sequence' && step.round ? `РАУНД ${step.round} ИЗ ${step.roundCount}` : `ДВИЖЕНИЕ ${stepIndex + 1} ИЗ ${steps.length}`}</span>
+                <h2>{taskTitle}</h2>
+                {mode === 'sequence' && seqStage === 'memorize' && (
+                  <div className="seq-board">
+                    {roundSteps.map((item, index) => (
+                      <b key={`${item.prompt}-${index}`} className={index < revealCount ? 'is-on' : 'is-wait'}>{index < revealCount ? item.prompt.replace('!', '') : '···'}</b>
+                    ))}
+                  </div>
+                )}
+                {mode === 'sequence' && seqStage === 'play' && (
+                  <div className="seq-pips" aria-hidden="true">
+                    {roundSteps.map((item, index) => (
+                      <span key={`${item.pose}-${index}`} className={index < indexInRound ? 'done' : index === indexInRound ? 'now' : ''} />
+                    ))}
+                  </div>
+                )}
+                {praising && mode !== 'sequence' && <div className="praise-chip">Правильно!</div>}
+                {praising && mode === 'sequence' && <div className="praise-chip">Есть</div>}
+                <p>{taskDetail}</p>
+              </div>
+              <div className="practice-meta">
+                {bossMode ? (
+                  <span><Target size={15} /> Правильных: <b>{bossScore}</b></span>
+                ) : mode === 'sequence' ? (
+                  <span><Target size={15} /> Раунд: <b>{step.round} / {step.roundCount}</b></span>
+                ) : (
+                  <span><Target size={15} /> Выполнено: <b>{stepIndex} / {steps.length}</b></span>
+                )}
+                <span><Star size={15} /> <b>+{STAR_REWARD} звёзд</b></span>
+              </div>
+              {cameraOn && activePose && !poseReady && !poseFailed && <p className="practice-disclaimer">Мово настраивает взгляд…</p>}
+              {poseFailed && <p className="practice-disclaimer">Распознавание не загрузилось. Можно пройти по кнопке.</p>}
+              {manualAllowed && (
+                <button className="primary-button practice-button" disabled={praising} onClick={() => hitRef.current()}>
+                  {mode === 'sequence' && seqStage === 'memorize' ? 'Я запомнил' : mode === 'sequence' ? 'Я вспомнил' : bossMode ? 'Я сделал!' : 'Я сделал'} <ArrowRight size={17} />
+                </button>
+              )}
+              {cameraOn && activePose && poseReady && !poseFailed && mode !== 'sequence' && <p className="practice-disclaimer">{bossMode ? 'Команда остаётся на месте. Подсказка, если нужна, появится на экране.' : 'Задание не исчезает. Подсказка, если нужна, появится красным на экране.'}</p>}
+              <span className="practice-disclaimer">Это игровое упражнение, двигайся комфортно.</span>
+            </>
+          )}
         </div>
       </div>
-      <section className="next-faculty"><div><span className="eyebrow">СЛЕДУЮЩАЯ ОСТАНОВКА</span><h3>Факультет координации</h3><p>Научимся управлять двумя руками одновременно.</p></div><div className="faculty-glyph">✧</div><span className="coming-soon">ОТКРОЕТСЯ ПОСЛЕ КУРСА</span></section>
+      {modal && (
+        <div className="modal-backdrop" onClick={() => setModal(false)}>
+          <div className="modal" onClick={(event) => event.stopPropagation()}>
+            <button className="modal-close" onClick={() => setModal(false)}><X size={18} /></button>
+            <div className="modal-icon"><CircleHelp /></div>
+            <h3>Камера пока недоступна</h3>
+            <p>Разреши доступ к камере в настройках браузера. А пока можешь пройти урок в демо-режиме.</p>
+            <button className="primary-button" onClick={() => { setModal(false); setPhase('practice'); }}>Хорошо, понятно</button>
+          </div>
+        </div>
+      )}
     </section>
-  </div>;
+  );
 }
 
-function RightRail({ doneToday, onQuest }) {
-  return <aside className="right-rail">
-    <section className="rail-card goal-card"><div className="rail-heading"><div><span className="rail-overline">ТВОЯ ЦЕЛЬ</span><h3>Маленький шаг<br/>каждый день</h3></div><div className="goal-icon"><Target size={20}/></div></div><p className="rail-muted">{doneToday} из 2 уроков завершено</p><div className="rail-progress"><span style={{width:`${doneToday*50}%`}}/></div><div className="quest-card"><div><span>ЕЖЕДНЕВНОЕ ЗАДАНИЕ</span><b>Пройди урок<br/>«Наклоны»</b></div><div className="reward-token">+20</div><button onClick={onQuest} aria-label="Начать ежедневное задание"><ChevronRight/></button></div></section>
-    <section className="rail-card streak-card"><div className="section-title"><h3>Серия занятий</h3><span className="streak-count"><Flame size={14} fill="currentColor"/> 7</span></div><div className="week-dots">{['Пн','Вт','Ср','Чт','Пт','Сб','Вс'].map((day,i)=><div className="day" key={day}><span className={i<4?'hit':i===4?'today':''}>{i<4?<Check size={14}/>:i===4?<Flame size={13} fill="currentColor"/>:''}</span><small>{day}</small></div>)}</div></section>
-    <section className="rail-card skills-card"><div className="section-title"><div><span className="rail-overline">ТВОИ УСПЕХИ</span><h3>Навыки недели</h3></div><button className="dots-button" aria-label="Подробнее">•••</button></div><Skill name="Лево / право" value="82%" progress={82} color="green"/><Skill name="Реакция" value="1,4 с" progress={67} color="blue"/><Skill name="Точность" value="76%" progress={76} color="yellow"/><div className="coach-tip"><span>💡</span><p><b>Совет Мово</b>Занимайся по 5 минут каждый день — так навык становится увереннее.</p></div></section>
-    <div className="privacy-note"><Shield size={15}/><span>Камера нужна только во время урока</span></div>
-  </aside>;
+function ResultScreen({ result, onContinue }) {
+  return (
+    <section className="result-page">
+      <div className="result-confetti">✦</div>
+      <div className="result-trophy"><Trophy size={52} /></div>
+      <span className="eyebrow"><Sparkles size={15} /> {result.boss ? 'БОСС' : 'ОТЛИЧНАЯ РАБОТА!'}</span>
+      <h1>{result.boss ? 'Босс побеждён!' : 'Ты прошёл урок!'}</h1>
+      <p className="page-subtitle">{result.boss ? `Правильных движений: ${result.correct}` : result.grades?.length ? `Оценки: ${result.grades.join(', ')}.` : `Урок «${result.lesson.title}» засчитан. Мово гордится тобой.`}</p>
+      <div className="result-stats">
+        <div><span className="stat-icon green"><Target /></span><b>{result.boss ? result.correct : `${result.moves} / ${result.moves}`}</b><small>{result.boss ? 'правильных' : 'движения'}</small></div>
+        <div><span className="stat-icon yellow"><Star /></span><b>{result.stars > 0 ? `+${result.stars}` : '0'}</b><small>{result.stars > 0 ? 'звёзд' : 'уже было'}</small></div>
+        <div><span className="stat-icon blue"><Clock3 /></span><b>{formatTime(result.seconds)}</b><small>время</small></div>
+      </div>
+      <div className="result-quote">
+        <img src="/assets/logo.png" alt="" />
+        <p>«У тебя здорово получается! Готов к следующему приключению?»<b>— Мово</b></p>
+      </div>
+      <button className="primary-button result-button" onClick={onContinue}>Вернуться на дорожку <ArrowRight size={17} /></button>
+    </section>
+  );
 }
-function Skill({name,value,progress,color}) { return <div className={`skill-row ${color}`}><span className="skill-dot"/><div className="skill-content"><div><b>{name}</b><strong>{value}</strong></div><div className="skill-track"><span style={{width:`${progress}%`}}/></div></div></div>; }
 
-function LessonScreen({ lesson, lessonIndex, cameraOn, videoRef, onStartCamera, onStopCamera, onFinish, onBack }) {
-  const [prompt, setPrompt] = useState(0);
-  const [count, setCount] = useState(0);
-  const [wait, setWait] = useState(true);
-  useEffect(() => { if (cameraOn) { setWait(true); const id = setTimeout(() => setWait(false), 2300); return () => clearTimeout(id); } }, [cameraOn, prompt]);
-  const commands = lesson.commands || ['Подними левую руку', 'Теперь подними правую руку', 'Подними обе руки'];
-  const targetReps = commands.length;
-  const doMove = () => { if (count >= targetReps) { onFinish(); return; } if (cameraOn && wait) return; setCount(c => c + 1); setWait(true); setPrompt(p => Math.min(p + 1, targetReps - 1)); };
-  return <section className="lesson-page"><button className="back-link" onClick={onBack}><ArrowLeft size={17}/> Вернуться на дорожку</button><div className="lesson-topline"><span className="eyebrow"><Sparkles size={15}/> ФАКУЛЬТЕТ СТОРОН</span><span className="lesson-number">УПРАЖНЕНИЕ {lesson.id} ИЗ 3</span></div><div className="lesson-title-row"><div><h1>{lesson.title}</h1><p className="page-subtitle">Посмотри на Мово и повторяй движения в своём темпе.</p></div><div className="timer-pill"><Clock3 size={16}/> 2–3 минуты</div></div><div className="lesson-progress"><span style={{width:`${Math.max(22, (count/targetReps)*100)}%`}}/></div><div className="practice-grid"><div className={`camera-stage ${cameraOn?'camera-on':''}`}>{cameraOn?<video ref={videoRef} autoPlay playsInline muted/>:<div className="camera-placeholder"><div className="camera-orbit orbit-one"/><div className="camera-orbit orbit-two"/><div className="camera-person"><div className="person-head"/><div className="person-body"/><div className="person-arm left-arm"/><div className="person-arm right-arm"/></div><div className="camera-mascot"><img src="/assets/logo.png" alt="Мово"/></div></div>}<div className="camera-label"><span className={cameraOn?'cam-live':''}/>{cameraOn?'КАМЕРА ВКЛЮЧЕНА':'ПРЕДПРОСМОТР УРОКА'}</div><div className="camera-controls"><button className="camera-control" onClick={cameraOn?onStopCamera:onStartCamera}>{cameraOn?'Выключить камеру':'Включить камеру'}</button><span>Изображение остаётся на устройстве</span></div></div><div className="coach-panel"><div className="coach-person"><img src="/assets/logo.png" alt="Мово"/><span>Мово · твой помощник</span></div><div className="coach-bubble"><span className="bubble-kicker">ДВИЖЕНИЕ {Math.min(count+1,targetReps)} ИЗ {targetReps}</span><h2>{commands[Math.min(prompt,targetReps-1)]}</h2><p>{wait&&cameraOn?'Хорошо! Приготовься к следующей команде.':'Встань так, чтобы тебя было хорошо видно целиком.'}</p></div><div className="hint-card"><Sparkles size={16}/><p><b>Подсказка</b>Смотри на цветную подсветку нужной стороны. Не торопись!</p></div><div className="practice-meta"><span><Target size={15}/> Выполнено: <b>{count} / {targetReps}</b></span><span><Star size={15}/> <b>+20 звёзд</b></span></div><button className="primary-button practice-button" onClick={doMove}>{count >= targetReps ? 'Завершить упражнение' : 'Я готов(а)!'}<ArrowRight size={17}/></button><span className="practice-disclaimer">Это игровое упражнение, двигайся комфортно.</span></div></div></section>;
+function TasksScreen({ progress, onOpen }) {
+  const rows = faculties.flatMap((faculty, facultyIndex) => {
+    if (facultyState(progress, facultyIndex) === 'locked') return [];
+    return faculty.lessons.map((lesson, lessonIndex) => ({
+      faculty,
+      lesson,
+      state: lessonState(progress, faculty, lessonIndex),
+    }));
+  });
+  const doneToday = Math.min(todayLessons(progress), 2);
+
+  return (
+    <section className="content-page">
+      <div className="eyebrow"><Target size={15} /> МАЛЕНЬКИЕ ШАГИ К БОЛЬШИМ ПОБЕДАМ</div>
+      <h1>Задания</h1>
+      <p className="page-subtitle">Здесь только открытые факультеты. Следующее задание включается после предыдущего.</p>
+      <div className="daily-progress-card">
+        <div>
+          <span className="rail-overline">ТВОЯ ДНЕВНАЯ ЦЕЛЬ</span>
+          <h2>{doneToday} из 2 заданий готово</h2>
+          <div className="rail-progress"><span style={{ width: `${doneToday * 50}%` }} /></div>
+        </div>
+        <div className="goal-icon"><Target /></div>
+      </div>
+      <div className="task-list">
+        {rows.map(({ faculty, lesson, state }) => (
+          <article key={lesson.id} className={`task-row ${state === 'done' ? 'completed' : ''} ${state === 'locked' ? 'locked' : ''}`}>
+            <span className="task-check">{state === 'done' ? <Check size={18} /> : state === 'locked' ? <LockKeyhole size={16} /> : <Play size={16} />}</span>
+            <div>
+              <b>{lesson.title}</b>
+              <small>{lesson.sub} · {faculty.title}</small>
+            </div>
+            <span className="task-reward"><Star size={14} fill="currentColor" /> {state === 'done' ? 'есть' : `+${STAR_REWARD}`}</span>
+            <button disabled={state === 'locked'} onClick={() => onOpen(faculty, lesson)}>
+              {state === 'done' ? 'Повторить' : state === 'locked' ? 'Закрыто' : 'Начать'} <ChevronRight size={15} />
+            </button>
+          </article>
+        ))}
+      </div>
+    </section>
+  );
 }
 
-function ResultScreen({ onContinue, lesson }) { return <section className="result-page"><div className="result-confetti">✦</div><div className="result-trophy"><Trophy size={52}/></div><span className="eyebrow"><Sparkles size={15}/> ОТЛИЧНАЯ РАБОТА!</span><h1>Ты прошёл урок!</h1><p className="page-subtitle">Мово гордится тобой. Каждый урок помогает двигаться увереннее.</p><div className="result-stats"><div><span className="stat-icon green"><Target/></span><b>3 / 3</b><small>движения</small></div><div><span className="stat-icon yellow"><Star/></span><b>+20</b><small>звёзд</small></div><div><span className="stat-icon blue"><Clock3/></span><b>2:34</b><small>время</small></div></div><div className="result-quote"><img src="/assets/logo.png" alt=""/><p>«У тебя здорово получается! Готов к следующему приключению?»<b>— Мово</b></p></div><button className="primary-button result-button" onClick={onContinue}>Вернуться на дорожку <ArrowRight size={17}/></button></section>; }
+function RewardsScreen({ stars }) {
+  const badges = [
+    ['🌟', 'Первый шаг', 'Первый завершённый урок', stars > 0 ? 'earned' : 'locked'],
+    ['🔥', 'Серия 3', 'Три дня движения подряд', 'locked'],
+    ['🧭', 'Следопыт', 'Пройди пять уроков', 'locked'],
+    ['🏆', 'Герой факультета', 'Заверши испытание курса', 'locked'],
+    ['💫', 'Суперсерия', 'Семь дней занятий', 'locked'],
+    ['🎓', 'Выпускник', 'Открой следующий факультет', 'locked'],
+  ];
+  return (
+    <section className="content-page">
+      <div className="eyebrow"><Award size={15} /> ТВОИ ДОСТИЖЕНИЯ</div>
+      <h1>Зал наград</h1>
+      <p className="page-subtitle">Каждая награда напоминает, как далеко ты уже продвинулся.</p>
+      <div className="reward-summary">
+        <span className="summary-icon"><Star fill="currentColor" /></span>
+        <div><b>{stars} звёзд</b><small>{stars > 0 ? 'Ты уже собираешь созвездие.' : 'Первый урок зажжёт первую звезду.'}</small></div>
+        <div className="summary-progress"><span style={{ width: `${Math.min(100, stars)}%` }} /></div>
+      </div>
+      <div className="badge-grid">
+        {badges.map((badge) => (
+          <article key={badge[1]} className={`badge-card ${badge[3]}`}>
+            <div>{badge[3] === 'earned' ? badge[0] : <LockKeyhole size={24} />}</div>
+            <b>{badge[1]}</b>
+            <small>{badge[2]}</small>
+            <span>{badge[3] === 'earned' ? 'ОТКРЫТО' : 'ВПЕРЕДИ'}</span>
+          </article>
+        ))}
+      </div>
+    </section>
+  );
+}
 
-function FacultiesScreen({ onStart }) { return <section className="content-page"><div className="eyebrow"><Sparkles size={15}/> МИР MOVO</div><h1>Факультеты академии</h1><p className="page-subtitle">Каждый факультет открывает новый навык. Проходи уроки, чтобы двигаться всё увереннее.</p><div className="faculty-grid">{faculties.map((f,i)=><article key={f[0]} className={`faculty-card ${f[4]}`}><div className="faculty-card-top"><span className="faculty-number">{f[0]}</span><span className="faculty-symbol">{f[5]}</span></div><span className="faculty-card-kicker">{f[1]}</span><h3>{f[2]}</h3><div className="faculty-card-bottom"><span className={`faculty-state ${f[4]}`}>{f[4]==='active'?<><span className="live-dot"/> В процессе</>:f[4]==='upcoming'?'Скоро откроется':<><LockKeyhole size={13}/> Закрыт</>}</span>{i===0&&<button onClick={onStart}>Продолжить <ArrowRight size={15}/></button>}</div></article>)}</div><div className="feature-note"><Shield size={19}/><div><b>Твой комфорт — главное</b><span>Все упражнения можно выполнять в удобном для тебя темпе.</span></div></div></section>; }
+function ParentsScreen({ doneToday, streak, stars }) {
+  return (
+    <section className="content-page">
+      <div className="eyebrow"><Shield size={15} /> ПРОГРЕСС СЕМЬИ</div>
+      <h1>Родительский уголок</h1>
+      <p className="page-subtitle">Здесь собраны успехи и занятия ребёнка — спокойно и без сравнений.</p>
+      <div className="parent-welcome">
+        <img src="/assets/logo.png" alt="Мово" />
+        <div>
+          <b>Привет! Я Мово 👋</b>
+          <span>Я помогу сделать домашние занятия понятными, короткими и интересными.</span>
+        </div>
+      </div>
+      <div className="parent-metrics">
+        <Metric icon={<Check />} value={`${doneToday}`} label="уроков сегодня" />
+        <Metric icon={<Flame />} value={`${streak} дней`} label="серия занятий" />
+        <Metric icon={<Star />} value={`${stars}`} label="звёзд" />
+      </div>
+      <article className="parent-report">
+        <div className="report-header">
+          <div>
+            <span className="rail-overline">ПОСЛЕДНИЕ 7 ДНЕЙ</span>
+            <h3>Занятия и навыки</h3>
+          </div>
+        </div>
+        <div className="report-bars">
+          {DAY_LABELS.map((day, index) => (
+            <div key={day}><span style={{ height: `${[62, 38, 78, 55, 70, 28, 48][index]}%` }} className={index === (new Date().getDay() + 6) % 7 ? 'current' : ''} /><small>{day}</small></div>
+          ))}
+        </div>
+        <div className="report-tip">
+          <Sparkles size={17} />
+          <span><b>Сильная сторона — лево и право</b>Попробуйте на следующей неделе добавить короткие упражнения на координацию.</span>
+        </div>
+        <p className="privacy-note inline"><Shield size={15} /> Movo показывает ход упражнений и не ставит диагнозы. Прогресс хранится только в браузере.</p>
+      </article>
+    </section>
+  );
+}
 
-function TasksScreen({ onStart, doneToday }) { return <section className="content-page"><div className="eyebrow"><Target size={15}/> МАЛЕНЬКИЕ ШАГИ К БОЛЬШИМ ПОБЕДАМ</div><h1>Задания на сегодня</h1><p className="page-subtitle">Короткие занятия помогают навыкам расти понемногу каждый день.</p><div className="daily-progress-card"><div><span className="rail-overline">ТВОЯ ДНЕВНАЯ ЦЕЛЬ</span><h2>{doneToday} из 2 заданий готово</h2><div className="rail-progress"><span style={{width:`${doneToday*50}%`}}/></div></div><div className="goal-icon"><Target/></div></div><div className="task-list"><TaskRow done={doneToday>0} label="Урок «Лево и право»" detail="3–5 минут · Факультет сторон" reward="+20" onClick={onStart}/><TaskRow done={doneToday>1} label="Урок «Наклоны»" detail="3–5 минут · Факультет сторон" reward="+20" onClick={onStart}/><TaskRow done={false} label="Свободная тренировка" detail="Повтори любимые движения" reward="+10" onClick={onStart}/></div></section>; }
-function TaskRow({done,label,detail,reward,onClick}) { return <article className={`task-row ${done?'completed':''}`}><span className="task-check">{done?<Check size={18}/>:<Play size={16}/>}</span><div><b>{label}</b><small>{detail}</small></div><span className="task-reward"><Star size={14} fill="currentColor"/> {reward}</span><button onClick={onClick}>{done?'Повторить':'Начать'} <ChevronRight size={15}/></button></article>; }
+function Metric({ icon, value, label }) {
+  return <div className="parent-metric"><span>{icon}</span><b>{value}</b><small>{label}</small></div>;
+}
 
-function RewardsScreen() { const badges=[['🌟','Первый шаг','Первый завершённый урок','earned'],['🔥','Серия 3','Три дня движения подряд','earned'],['🧭','Следопыт','Пройди пять уроков','locked'],['🏆','Герой факультета','Заверши испытание курса','locked'],['💫','Суперсерия','Семь дней занятий','earned'],['🎓','Выпускник','Открой следующий факультет','locked']]; return <section className="content-page"><div className="eyebrow"><Award size={15}/> ТВОИ ДОСТИЖЕНИЯ</div><h1>Зал наград</h1><p className="page-subtitle">Каждая награда напоминает, как далеко ты уже продвинулся.</p><div className="reward-summary"><span className="summary-icon"><Star fill="currentColor"/></span><div><b>320 звёзд</b><small>Ты уже собрал целое созвездие!</small></div><div className="summary-progress"><span style={{width:'42%'}}/></div></div><div className="badge-grid">{badges.map(b=><article key={b[1]} className={`badge-card ${b[3]}`}><div>{b[3]==='earned'?b[0]:<LockKeyhole size={24}/>}</div><b>{b[1]}</b><small>{b[2]}</small><span>{b[3]==='earned'?'ОТКРЫТО':'ВПЕРЕДИ'}</span></article>)}</div></section>; }
-
-function ParentsScreen({ doneToday, streak }) { return <section className="content-page"><div className="eyebrow"><Shield size={15}/> ПРОГРЕСС СЕМЬИ</div><h1>Родительский уголок</h1><p className="page-subtitle">Здесь собраны успехи и занятия ребёнка — спокойно и без сравнений.</p><div className="parent-welcome"><img src="/assets/logo.png" alt="Мово"/><div><b>Привет! Я Мово 👋</b><span>Я помогу сделать домашние занятия понятными, короткими и интересными.</span></div></div><div className="parent-metrics"><Metric icon={<Check/>} value={`${doneToday}`} label="уроков сегодня"/><Metric icon={<Flame/>} value={`${streak} дней`} label="серия занятий"/><Metric icon={<Star/>} value="82%" label="точность движений"/></div><article className="parent-report"><div className="report-header"><div><span className="rail-overline">ПОСЛЕДНИЕ 7 ДНЕЙ</span><h3>Занятия и навыки</h3></div><button className="filter-button">Эта неделя <ChevronRight size={14}/></button></div><div className="report-bars">{['Пн','Вт','Ср','Чт','Пт','Сб','Вс'].map((d,i)=><div key={d}><span style={{height:`${[62,38,78,55,70,28,48][i]}%`}} className={i===6?'current':''}/><small>{d}</small></div>)}</div><div className="report-tip"><Sparkles size={17}/><span><b>Сильная сторона — лево и право</b>Попробуйте на следующей неделе добавить короткие упражнения на координацию.</span></div><p className="privacy-note inline"><Shield size={15}/> Magic Motion показывает ход упражнений и не ставит диагнозы.</p></article></section>; }
-function Metric({icon,value,label}) { return <div className="parent-metric"><span>{icon}</span><b>{value}</b><small>{label}</small></div>; }
-
-createRoot(document.getElementById('root')).render(<App/>);
+createRoot(document.getElementById('root')).render(<App />);
