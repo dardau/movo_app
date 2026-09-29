@@ -4,9 +4,9 @@ import { Activity, ArrowLeft, ArrowRight, Award, Check, ChevronRight, CircleHelp
 import './styles.css';
 
 const lessons = [
-  { id: 1, title: 'Руки', sub: 'Подними нужную руку', state: 'done', icon: '✦' },
-  { id: 2, title: 'Наклоны', sub: 'Найди свою сторону', state: 'done', icon: '↔' },
-  { id: 3, title: 'Стороны', sub: 'Лево и право', state: 'current', icon: '↔' },
+  { id: 1, title: 'Левая рука', sub: 'Подними левую руку', state: 'current', icon: '←', commands: ['Подними левую руку', 'Покажи левую сторону ещё раз', 'Молодец! Ещё раз левая рука'] },
+  { id: 2, title: 'Правая рука', sub: 'Подними правую руку', state: 'locked', icon: '→', commands: ['Подними правую руку', 'Покажи правую сторону ещё раз', 'Отлично! Ещё раз правая рука'] },
+  { id: 3, title: 'Лево и право', sub: 'Выбери нужную сторону', state: 'locked', icon: '↔', commands: ['Подними левую руку', 'Теперь подними правую руку', 'Наклонись влево', 'Наклонись вправо'] },
   { id: 4, title: 'Щит', sub: 'Защити академию', state: 'locked', icon: '⬡' },
   { id: 5, title: 'Комбо', sub: 'Соедини движения', state: 'locked', icon: '✧' },
   { id: 6, title: 'Реакция', sub: 'Успей за сигналом', state: 'locked', icon: '⚡' },
@@ -25,11 +25,12 @@ const faculties = [
 function App() {
   const [screen, setScreen] = useState('path');
   const [activeTab, setActiveTab] = useState('Путь');
-  const [lessonIndex, setLessonIndex] = useState(2);
+  const [lessonIndex, setLessonIndex] = useState(0);
   const [modal, setModal] = useState(false);
   const [cameraOn, setCameraOn] = useState(false);
   const [mobileNav, setMobileNav] = useState(false);
-  const [doneToday, setDoneToday] = useState(1);
+  const [doneToday, setDoneToday] = useState(0);
+  const [completedLessons, setCompletedLessons] = useState(0);
   const [streak, setStreak] = useState(7);
   const videoRef = useRef(null);
   const streamRef = useRef(null);
@@ -56,7 +57,8 @@ function App() {
   const finishLesson = () => {
     stopCamera();
     setDoneToday(n => Math.min(n + 1, 2));
-    setLessonIndex(i => Math.min(i + 1, lessons.length - 1));
+    setCompletedLessons(n => Math.min(n + 1, 3));
+    setLessonIndex(i => Math.min(i + 1, 2));
     setScreen('result');
   };
   const go = (tab) => {
@@ -90,15 +92,15 @@ function App() {
         <div className="sidebar-bottom"><div className="parent-card"><strong>Для родителей</strong><span>Прогресс и домашние занятия</span><button onClick={() => go('Для родителей')}>Открыть <ArrowRight size={14}/></button></div><span className="sidebar-foot">Двигайся. Учись. Твори магию.</span></div>
       </aside>
       <main className="main-area">
-        {screen === 'path' && <PathScreen onStart={() => launchLesson()} onLesson={launchLesson} doneToday={doneToday}/>}
+        {screen === 'path' && <PathScreen onStart={() => launchLesson(Math.min(completedLessons, 2))} onLesson={launchLesson} doneToday={doneToday} completedLessons={completedLessons}/>}
         {screen === 'lesson' && <LessonScreen lesson={lesson} lessonIndex={lessonIndex} cameraOn={cameraOn} videoRef={videoRef} onStartCamera={startCamera} onStopCamera={stopCamera} onFinish={finishLesson} onBack={() => { stopCamera(); setScreen('path'); }}/>} 
         {screen === 'result' && <ResultScreen onContinue={() => setScreen('path')} lesson={lessons[Math.max(0, lessonIndex - 1)]}/>}
-        {screen === 'faculties' && <FacultiesScreen onStart={() => launchLesson(2)}/>}
-        {screen === 'tasks' && <TasksScreen onStart={() => launchLesson(1)} doneToday={doneToday}/>}
+        {screen === 'faculties' && <FacultiesScreen onStart={() => launchLesson(Math.min(completedLessons, 2))}/>}
+        {screen === 'tasks' && <TasksScreen onStart={() => launchLesson(Math.min(completedLessons, 2))} doneToday={doneToday}/>}
         {screen === 'rewards' && <RewardsScreen/>}
         {screen === 'parents' && <ParentsScreen doneToday={doneToday} streak={streak}/>}
       </main>
-      {(screen === 'path' || screen === 'faculties') && <RightRail doneToday={doneToday} onQuest={() => launchLesson(1)}/>}
+      {(screen === 'path' || screen === 'faculties') && <RightRail doneToday={doneToday} onQuest={() => launchLesson(Math.min(completedLessons, 2))}/>}
     </div>
     {modal && <div className="modal-backdrop" onClick={() => setModal(false)}><div className="modal" onClick={e => e.stopPropagation()}><button className="modal-close" onClick={() => setModal(false)}><X size={18}/></button><div className="modal-icon"><CircleHelp/></div><h3>Камера пока недоступна</h3><p>Разреши доступ к камере в настройках браузера. А пока можешь пройти урок в демо-режиме.</p><button className="primary-button" onClick={() => { setModal(false); }}>Хорошо, понятно</button></div></div>}
     {mobileNav && <button className="nav-scrim" onClick={() => setMobileNav(false)} aria-label="Закрыть меню"/>}
@@ -107,22 +109,22 @@ function App() {
 
 function NavItem({ label, active, onClick, icon }) { return <button className={`nav-item ${active ? 'active' : ''}`} onClick={onClick}><span className="nav-icon">{icon}</span><span>{label}</span>{active && <ChevronRight size={16} className="nav-chevron"/>}</button>; }
 
-function PathScreen({ onStart, onLesson, doneToday }) {
-  const progress = 5;
+function PathScreen({ onStart, onLesson, doneToday, completedLessons }) {
+  const progress = completedLessons;
   return <div className="path-layout">
     <section className="path-column">
       <div className="eyebrow"><Sparkles size={15}/> ФАКУЛЬТЕТ СТОРОН</div>
       <div className="heading-row"><div><h1>Твой путь движения</h1><p className="page-subtitle">Короткие уроки помогают различать лево и право,<br className="desktop-only"/> двигаться точнее и увереннее.</p></div><div className="level-chip"><span>УРОВЕНЬ 1</span><b>✨</b></div></div>
       <div className="course-hero">
         <div className="course-badge"><img src="/assets/badge.svg" alt=""/><span>↔</span></div>
-        <div className="course-info"><span className="course-kicker">КУРС 1 · ОСНОВЫ ДВИЖЕНИЯ</span><h2>Лево и право</h2><p>{progress} из 12 уроков · осталось 7 минут</p><div className="course-progress"><span style={{width:`${(progress/12)*100}%`}}/></div></div>
+        <div className="course-info"><span className="course-kicker">КУРС 1 · ОСНОВЫ ДВИЖЕНИЯ</span><h2>Лево и право</h2><p>{progress} из 3 упражнений · осталось {Math.max(2, (3-progress)*2)} минуты</p><div className="course-progress"><span style={{width:`${(progress/3)*100}%`}}/></div></div>
         <button className="continue-button" onClick={onStart}><Play size={16} fill="currentColor"/> Продолжить</button>
       </div>
-      <div className="lesson-map-wrap"><div className="map-caption"><span><span className="live-dot"/> ТВОЙ МАРШРУТ</span><span>3 урока пройдено</span></div>
+      <div className="lesson-map-wrap"><div className="map-caption"><span><span className="live-dot"/> ТВОЙ МАРШРУТ</span><span>{completedLessons} из 3 упражнений пройдено</span></div>
         <div className="lesson-map">
           <svg className="map-path" viewBox="0 0 520 835" preserveAspectRatio="none" aria-hidden="true"><path d="M222 32 C190 64 118 86 114 132 C107 179 245 202 257 263 C267 321 173 336 153 397 C135 452 265 481 275 543 C285 599 177 617 166 675 C155 727 264 744 286 811" fill="none" stroke="#b8dfc7" strokeWidth="12" strokeLinecap="round" strokeDasharray="1 0"/></svg>
           <div className="path-start"><span>✦</span><b>Курс начинается здесь</b><small>Каждый шаг — новое движение</small></div>
-          {lessons.map((l, i) => <button key={l.id} onClick={() => l.state === 'locked' ? null : onLesson(Math.min(i,2))} className={`lesson-stop stop-${i+1} ${l.state}`} aria-label={`${l.id}. ${l.title}${l.state==='locked' ? ', закрыто' : ''}`}><span className="stop-core">{l.state==='done' ? <Check/> : l.state==='locked' ? <LockKeyhole/> : l.icon}</span><span className="stop-label"><b>{l.id === 8 ? 'ФИНАЛЬНОЕ ИСПЫТАНИЕ' : `${l.id} · ${l.title}`}</b><small>{l.sub}</small></span></button>)}
+          {lessons.map((l, i) => { const available = i < completedLessons || i === completedLessons && i < 3; const completed = i < completedLessons; const state = completed ? 'done' : available ? 'current' : l.state === 'boss' ? 'boss' : 'locked'; return <button key={l.id} onClick={() => available && onLesson(i)} className={`lesson-stop stop-${i+1} ${state}`} aria-label={`${l.id}. ${l.title}${!available ? ', закрыто' : ''}`}><span className="stop-core">{completed ? <Check/> : state === 'locked' ? <LockKeyhole/> : l.icon}</span><span className="stop-label"><b>{i < 3 ? `УПРАЖНЕНИЕ ${i+1}` : l.id === 8 ? 'ФИНАЛЬНОЕ ИСПЫТАНИЕ' : `${l.id} · ${l.title}`}</b><small>{l.title}</small></span></button>; })}
           <div className="map-reward"><div className="chest">🎁</div><div><b>Сундук академии</b><small>Открой после испытания</small></div><LockKeyhole size={16}/></div>
         </div>
       </div>
@@ -146,9 +148,10 @@ function LessonScreen({ lesson, lessonIndex, cameraOn, videoRef, onStartCamera, 
   const [count, setCount] = useState(0);
   const [wait, setWait] = useState(true);
   useEffect(() => { if (cameraOn) { setWait(true); const id = setTimeout(() => setWait(false), 2300); return () => clearTimeout(id); } }, [cameraOn, prompt]);
-  const commands = ['Подними левую руку', 'Теперь подними правую руку', 'Подними обе руки'];
-  const doMove = () => { if (!cameraOn) { setPrompt(p => (p + 1) % commands.length); setCount(c => c + 1); return; } if (wait) return; setCount(c => c + 1); setWait(true); setPrompt(p => (p + 1) % commands.length); };
-  return <section className="lesson-page"><button className="back-link" onClick={onBack}><ArrowLeft size={17}/> Вернуться на дорожку</button><div className="lesson-topline"><span className="eyebrow"><Sparkles size={15}/> ФАКУЛЬТЕТ СТОРОН</span><span className="lesson-number">УРОК {lesson.id} ИЗ 12</span></div><div className="lesson-title-row"><div><h1>{lesson.title === 'Стороны' ? 'Лево и право' : lesson.title}</h1><p className="page-subtitle">Посмотри на Мово и повторяй движения в своём темпе.</p></div><div className="timer-pill"><Clock3 size={16}/> 3–5 минут</div></div><div className="lesson-progress"><span style={{width:`${Math.max(22, ((lesson.id-1)/12)*100)}%`}}/></div><div className="practice-grid"><div className={`camera-stage ${cameraOn?'camera-on':''}`}>{cameraOn?<video ref={videoRef} autoPlay playsInline muted/>:<div className="camera-placeholder"><div className="camera-orbit orbit-one"/><div className="camera-orbit orbit-two"/><div className="camera-person"><div className="person-head"/><div className="person-body"/><div className="person-arm left-arm"/><div className="person-arm right-arm"/></div><div className="camera-mascot"><img src="/assets/logo.png" alt="Мово"/></div></div>}<div className="camera-label"><span className={cameraOn?'cam-live':''}/>{cameraOn?'КАМЕРА ВКЛЮЧЕНА':'ПРЕДПРОСМОТР УРОКА'}</div><div className="camera-controls"><button className="camera-control" onClick={cameraOn?onStopCamera:onStartCamera}>{cameraOn?'Выключить камеру':'Включить камеру'}</button><span>Изображение остаётся на устройстве</span></div></div><div className="coach-panel"><div className="coach-person"><img src="/assets/logo.png" alt="Мово"/><span>Мово · твой помощник</span></div><div className="coach-bubble"><span className="bubble-kicker">ЗАДАНИЕ {count+1}</span><h2>{commands[prompt]}</h2><p>{wait&&cameraOn?'Отлично! Теперь повтори движение.':'Встань так, чтобы тебя было хорошо видно целиком.'}</p></div><div className="hint-card"><Sparkles size={16}/><p><b>Подсказка</b>Смотри на цветную подсветку нужной стороны. Не торопись!</p></div><div className="practice-meta"><span><Target size={15}/> Выполнено: <b>{count} / 3</b></span><span><Star size={15}/> <b>+20 звёзд</b></span></div><button className="primary-button practice-button" onClick={count>=2?onFinish:doMove}>{count>=2?'Завершить урок':'Я готов(а)!'}<ArrowRight size={17}/></button><span className="practice-disclaimer">Это игровое упражнение, двигайся комфортно.</span></div></div></section>;
+  const commands = lesson.commands || ['Подними левую руку', 'Теперь подними правую руку', 'Подними обе руки'];
+  const targetReps = commands.length;
+  const doMove = () => { if (count >= targetReps) { onFinish(); return; } if (cameraOn && wait) return; setCount(c => c + 1); setWait(true); setPrompt(p => Math.min(p + 1, targetReps - 1)); };
+  return <section className="lesson-page"><button className="back-link" onClick={onBack}><ArrowLeft size={17}/> Вернуться на дорожку</button><div className="lesson-topline"><span className="eyebrow"><Sparkles size={15}/> ФАКУЛЬТЕТ СТОРОН</span><span className="lesson-number">УПРАЖНЕНИЕ {lesson.id} ИЗ 3</span></div><div className="lesson-title-row"><div><h1>{lesson.title}</h1><p className="page-subtitle">Посмотри на Мово и повторяй движения в своём темпе.</p></div><div className="timer-pill"><Clock3 size={16}/> 2–3 минуты</div></div><div className="lesson-progress"><span style={{width:`${Math.max(22, (count/targetReps)*100)}%`}}/></div><div className="practice-grid"><div className={`camera-stage ${cameraOn?'camera-on':''}`}>{cameraOn?<video ref={videoRef} autoPlay playsInline muted/>:<div className="camera-placeholder"><div className="camera-orbit orbit-one"/><div className="camera-orbit orbit-two"/><div className="camera-person"><div className="person-head"/><div className="person-body"/><div className="person-arm left-arm"/><div className="person-arm right-arm"/></div><div className="camera-mascot"><img src="/assets/logo.png" alt="Мово"/></div></div>}<div className="camera-label"><span className={cameraOn?'cam-live':''}/>{cameraOn?'КАМЕРА ВКЛЮЧЕНА':'ПРЕДПРОСМОТР УРОКА'}</div><div className="camera-controls"><button className="camera-control" onClick={cameraOn?onStopCamera:onStartCamera}>{cameraOn?'Выключить камеру':'Включить камеру'}</button><span>Изображение остаётся на устройстве</span></div></div><div className="coach-panel"><div className="coach-person"><img src="/assets/logo.png" alt="Мово"/><span>Мово · твой помощник</span></div><div className="coach-bubble"><span className="bubble-kicker">ДВИЖЕНИЕ {Math.min(count+1,targetReps)} ИЗ {targetReps}</span><h2>{commands[Math.min(prompt,targetReps-1)]}</h2><p>{wait&&cameraOn?'Хорошо! Приготовься к следующей команде.':'Встань так, чтобы тебя было хорошо видно целиком.'}</p></div><div className="hint-card"><Sparkles size={16}/><p><b>Подсказка</b>Смотри на цветную подсветку нужной стороны. Не торопись!</p></div><div className="practice-meta"><span><Target size={15}/> Выполнено: <b>{count} / {targetReps}</b></span><span><Star size={15}/> <b>+20 звёзд</b></span></div><button className="primary-button practice-button" onClick={doMove}>{count >= targetReps ? 'Завершить упражнение' : 'Я готов(а)!'}<ArrowRight size={17}/></button><span className="practice-disclaimer">Это игровое упражнение, двигайся комфортно.</span></div></div></section>;
 }
 
 function ResultScreen({ onContinue, lesson }) { return <section className="result-page"><div className="result-confetti">✦</div><div className="result-trophy"><Trophy size={52}/></div><span className="eyebrow"><Sparkles size={15}/> ОТЛИЧНАЯ РАБОТА!</span><h1>Ты прошёл урок!</h1><p className="page-subtitle">Мово гордится тобой. Каждый урок помогает двигаться увереннее.</p><div className="result-stats"><div><span className="stat-icon green"><Target/></span><b>3 / 3</b><small>движения</small></div><div><span className="stat-icon yellow"><Star/></span><b>+20</b><small>звёзд</small></div><div><span className="stat-icon blue"><Clock3/></span><b>2:34</b><small>время</small></div></div><div className="result-quote"><img src="/assets/logo.png" alt=""/><p>«У тебя здорово получается! Готов к следующему приключению?»<b>— Мово</b></p></div><button className="primary-button result-button" onClick={onContinue}>Вернуться на дорожку <ArrowRight size={17}/></button></section>; }
