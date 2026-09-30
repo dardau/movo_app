@@ -21,6 +21,7 @@ h1,h2,h3,.brand-name,.course-badge span,.stop-core,.faculty-glyph,.faculty-symbo
 .lesson-map.compact.lessons-2{height:460px}
 .lesson-map.compact .map-reward{top:auto;bottom:12px;right:8px}
 .lesson-map.compact .path-start{top:0}
+.lesson-stop{--stop-size:64px;transform:translate(-50%,calc(var(--stop-size) / -2))}
 .lesson-stop:disabled{cursor:not-allowed}
 .lesson-stop:disabled:hover .stop-core{transform:none;box-shadow:none}
 .task-row.locked{opacity:.78}
@@ -38,7 +39,8 @@ h1,h2,h3,.brand-name,.course-badge span,.stop-core,.faculty-glyph,.faculty-symbo
 .prep-list svg{color:#29aa52}
 .secondary-button{margin-top:8px;border:0;background:transparent;color:#5d7768;font-weight:800;font-size:13px;height:40px}
 .next-faculty .next-open{margin-top:14px}
-@media(max-width:760px){.lesson-map.compact{height:460px}.lesson-map.compact.lessons-2{height:400px}.pose-banner{font-size:12px;bottom:54px}}
+@media(max-width:760px){.lesson-map.compact{height:460px}.lesson-map.compact.lessons-2{height:400px}.lesson-stop{--stop-size:56px}.pose-banner{font-size:12px;bottom:54px}}
+.badge-grid.faculty-badges{grid-template-columns:repeat(2,minmax(0,1fr))}
 @media(max-width:390px){.lesson-map.compact{height:420px}}
 
 @media (min-width: 761px) {
@@ -104,7 +106,8 @@ h1,h2,h3,.brand-name,.course-badge span,.stop-core,.faculty-glyph,.faculty-symbo
 }
 
 .exercise-video.is-mirrored { transform: scaleX(-1); }
-.camera-readiness { margin: 2px 0 0; text-align: center; color: #7a5b16; background: #fff4cf; border-radius: 13px; padding: 9px 12px; font-size: 12px; font-weight: 700; }
+.frame-countdown { position: absolute; inset: 0; z-index: 6; display: grid; place-items: center; color: #fff; font: 700 140px/1 Fredoka, Nunito, sans-serif; text-shadow: 0 8px 24px #123b2a; pointer-events: none; background: #123b2a33; }
+.camera-readiness { margin: 2px 0 0; text-align: center; color: #7a5b16; background: #fff4cf; border-radius: 13px; padding: 9px 12px; font-size: 18px; font-weight: 800; }
 .camera-readiness.is-ready { color: #216f3b; background: #e4f7d9; }
 .primary-button:disabled { cursor: not-allowed; opacity: .55; }
 
@@ -147,6 +150,12 @@ h1,h2,h3,.brand-name,.course-badge span,.stop-core,.faculty-glyph,.faculty-symbo
 .seq-pips span { width: 16px; height: 16px; border-radius: 50%; background: #d7e5dc; }
 .seq-pips span.now { background: #29aa52; transform: scale(1.15); }
 .seq-pips span.done { background: #7ed957; }
+.balance-hold { margin: 8px 0 0; font-size: 16px; font-weight: 800; color: #165a3a; line-height: 1.3; }
+.layout.lesson-focus .coach-panel { justify-content: safe center; overflow: auto; }
+.layout.lesson-focus .exercise-video-wrap { height: clamp(108px, 15vh, 148px); }
+.layout.lesson-focus .coach-bubble h2 { font-weight: 900; color: #123b2a; font-size: clamp(28px, 2.4vw, 36px); line-height: 1.15; min-height: 0; }
+.coach-bubble h2.task-lead { white-space: pre-line; }
+.layout.lesson-focus .coach-bubble p { font-size: 16px; line-height: 1.4; font-weight: 700; color: #5d7768; margin: 8px 0 0; }
 
 /* Child-friendly type and controls: large, rounded and easy to scan. */
 :root { --font-rounded: 'Nunito', 'Arial Rounded MT Bold', ui-rounded, sans-serif; }
@@ -196,7 +205,7 @@ h1, h2, h3,
 }
 
 @media (min-width: 761px) {
-  .layout.lesson-focus .exercise-video-wrap { height: clamp(155px, 22vh, 210px); }
+  .layout.lesson-focus .exercise-video-wrap { height: clamp(108px, 15vh, 148px); }
   .layout.lesson-focus .prep-list { margin-top: 8px; gap: 6px; }
   .layout.lesson-focus .secondary-button { min-height: 44px; }
 }

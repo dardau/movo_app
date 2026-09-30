@@ -10,8 +10,8 @@ import {
   completeLesson, currentWork, facultyState, lessonState, lessonsDone, loadProgress,
   saveProgress, todayLessons,
 } from './progress.js';
-import { createPoseLandmarker, drawPose, evaluatePose, frameStatus, HOLD_MS } from './pose.js';
-import { resetSpeech, speakRu } from './speech.js';
+import { BALANCE_HOLD_MS, BOTH_ARMS_HINT, createPoseLandmarker, drawPose, evaluatePose, frameStatus, HOLD_MS, resetBalanceMotion, trackBalanceMotion } from './pose.js';
+import { hintLocked, instructionSettled, resetSpeech, speakRu } from './speech.js';
 import './styles.css';
 
 const DAY_LABELS = ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс'];
@@ -51,6 +51,12 @@ const EXERCISE_VIDEOS = {
   'both-arms': '/videos/both-hands.mp4',
   success: '/videos/celebrate.mp4',
   retry: '/videos/try-again.mp4',
+  // Место для анимаций факультета равновесия. Напарник подставит ролики.
+  airplane: null,
+  'one-leg-right': null,
+  'one-leg-left': null,
+  'balance-right': null,
+  'balance-left': null,
 };
 
 function ExerciseVideo({ src, pose, playbackKey }) {
@@ -206,7 +212,7 @@ function App() {
               onContinue={() => showScreen(() => { setFacultyId(result.faculty.id); setScreen('path'); setActiveTab('Путь'); })}
             />
           )}
-          {screen === 'rewards' && <RewardsScreen stars={progress.stars} />}
+          {screen === 'rewards' && <RewardsScreen progress={progress} />}
           {screen === 'parents' && <ParentsScreen doneToday={doneToday} streak={progress.streak} stars={progress.stars} />}
         </main>
         <RightRail
@@ -236,12 +242,12 @@ function FacultiesScreen({ progress, onOpen }) {
     <section className="content-page">
       <div className="eyebrow"><Sparkles size={15} /> МИР MOVO</div>
       <h1>Факультеты академии</h1>
-      <p className="page-subtitle">Каждый факультет открывает новый навык. Следующий откроется, когда пройдёшь предыдущий целиком.</p>
+      <p className="page-subtitle">Сначала факультет сторон, потом равновесие. Реакция и память пока закрыты.</p>
       <div className="faculty-grid">
         {faculties.map((item, index) => {
           const state = facultyState(progress, index);
           const done = lessonsDone(progress, item);
-          const label = state === 'locked' ? 'Закрыт' : state === 'done' ? 'Пройден' : done > 0 ? 'В процессе' : 'Открыт';
+          const label = item.sealed ? 'Пока закрыт' : state === 'locked' ? 'Закрыт' : state === 'done' ? 'Пройден' : done > 0 ? 'В процессе' : 'Открыт';
           return (
             <article key={item.id} className={`faculty-card ${state} ${state === 'locked' ? '' : 'is-open'}`} onClick={() => onOpen(item)}>
               <div className="faculty-card-top">
@@ -284,6 +290,7 @@ function PathScreen({ faculty, progress, onLesson, onOpenFaculty }) {
   const total = faculty.lessons.length;
   const current = faculty.lessons.find((_, index) => lessonState(progress, faculty, index) === 'current');
   const nextFaculty = faculties[facultyIndex + 1];
+  const nextSealed = Boolean(nextFaculty?.sealed);
   const nextLocked = nextFaculty ? facultyState(progress, facultyIndex + 1) === 'locked' : false;
   const spots = spotsFor(total);
 
@@ -303,7 +310,7 @@ function PathScreen({ faculty, progress, onLesson, onOpenFaculty }) {
           <div className="course-info">
             <span className="course-kicker">{faculty.kicker}</span>
             <h2>{faculty.course}</h2>
-            <p>{done} из {total} {faculty.id === 'sides' ? 'уровней' : 'упражнений'}{done === total ? ' · курс пройден' : ` · осталось ${minutesLabel((total - done) * 2)}`}</p>
+            <p>{done} из {total} {faculty.id === 'sides' || faculty.id === 'balance' ? 'уровней' : 'упражнений'}{done === total ? ' · курс пройден' : ` · осталось ${minutesLabel((total - done) * 2)}`}</p>
             <div className="course-progress"><span style={{ width: `${(done / total) * 100}%` }} /></div>
           </div>
           <button className="continue-button" onClick={() => onLesson(current ?? faculty.lessons[0])}>
@@ -313,7 +320,7 @@ function PathScreen({ faculty, progress, onLesson, onOpenFaculty }) {
         <div className="lesson-map-wrap">
           <div className="map-caption">
             <span><span className="live-dot" /> ТВОЙ МАРШРУТ</span>
-            <span>{done} из {total} {faculty.id === 'sides' ? 'уровней' : 'упражнений'} пройдено</span>
+            <span>{done} из {total} {faculty.id === 'sides' || faculty.id === 'balance' ? 'уровней' : 'упражнений'} пройдено</span>
           </div>
           <div className={`lesson-map compact lessons-${total}`}>
             <svg className="map-path" viewBox="0 0 520 560" preserveAspectRatio="none" aria-hidden="true">
@@ -332,7 +339,7 @@ function PathScreen({ faculty, progress, onLesson, onOpenFaculty }) {
                   aria-label={`${index + 1}. ${item.title}${state === 'locked' ? ', закрыто' : ''}`}
                 >
                   <span className="stop-core">{state === 'done' ? <Check /> : state === 'locked' ? <LockKeyhole /> : item.icon}</span>
-                  <span className="stop-label"><b>{faculty.id === 'sides' ? `УРОВЕНЬ ${index + 1}` : `УПРАЖНЕНИЕ ${index + 1}`}</b><small>{item.title}</small></span>
+                  <span className="stop-label"><b>{faculty.id === 'sides' || faculty.id === 'balance' ? `УРОВЕНЬ ${index + 1}` : `УПРАЖНЕНИЕ ${index + 1}`}</b><small>{item.title}</small></span>
                 </button>
               );
             })}
@@ -351,7 +358,7 @@ function PathScreen({ faculty, progress, onLesson, onOpenFaculty }) {
               <p>{nextFaculty.summary}</p>
             </div>
             <div className="faculty-glyph">{nextFaculty.symbol}</div>
-            {nextLocked ? <span className="coming-soon">ОТКРОЕТСЯ ПОСЛЕ КУРСА</span> : (
+            {nextSealed || nextLocked ? <span className="coming-soon">{nextSealed ? 'ПОКА ЗАКРЫТ' : 'ОТКРОЕТСЯ ПОСЛЕ КУРСА'}</span> : (
               <button className="continue-button next-open" onClick={() => onOpenFaculty(nextFaculty)}>Открыть факультет</button>
             )}
           </section>
@@ -362,9 +369,9 @@ function PathScreen({ faculty, progress, onLesson, onOpenFaculty }) {
 }
 
 function spotsFor(count) {
-  if (count <= 1) return [{ left: '38%', top: '42%' }];
-  if (count === 2) return [{ left: '16%', top: '28%' }, { left: '52%', top: '66%' }];
-  return [{ left: '12%', top: '16%' }, { left: '54%', top: '42%' }, { left: '22%', top: '70%' }];
+  if (count <= 1) return [{ left: '56.3%', top: '48.4%' }];
+  if (count === 2) return [{ left: '27.5%', top: '26.5%' }, { left: '43.3%', top: '77.5%' }];
+  return [{ left: '27.5%', top: '26.5%' }, { left: '64.3%', top: '51%' }, { left: '35.4%', top: '82.2%' }];
 }
 
 function RightRail({ progress, doneToday, quest, onQuest }) {
@@ -418,7 +425,7 @@ function RightRail({ progress, doneToday, quest, onQuest }) {
           </div>
         </div>
         <Skill name="Лево / право" value={`${lessonsDone(progress, faculties[0])} / ${faculties[0].lessons.length}`} progress={(lessonsDone(progress, faculties[0]) / faculties[0].lessons.length) * 100} color="green" />
-        <Skill name="Координация" value={`${lessonsDone(progress, faculties[1])} / ${faculties[1].lessons.length}`} progress={(lessonsDone(progress, faculties[1]) / faculties[1].lessons.length) * 100} color="blue" />
+        <Skill name="Равновесие" value={`${lessonsDone(progress, faculties[1])} / ${faculties[1].lessons.length}`} progress={(lessonsDone(progress, faculties[1]) / faculties[1].lessons.length) * 100} color="blue" />
         <Skill name="Звёзды" value={`${progress.stars}`} progress={Math.min(100, progress.stars / 2)} color="yellow" />
         <div className="coach-tip"><span>💡</span><p><b>Совет Мово</b>Занимайся по 5 минут каждый день — так навык становится увереннее.</p></div>
       </section>
@@ -443,6 +450,7 @@ function LessonScreen({ faculty, lesson, onBack, onFinish }) {
   const lessonIndex = faculty.lessons.findIndex((item) => item.id === lesson.id);
   const steps = lesson.steps;
   const [phase, setPhase] = useState('prep');
+  const [countdown, setCountdown] = useState(null);
   const [stepIndex, setStepIndex] = useState(0);
   const [cameraOn, setCameraOn] = useState(false);
   const [modal, setModal] = useState(false);
@@ -515,6 +523,19 @@ function LessonScreen({ faculty, lesson, onBack, onFinish }) {
   useEffect(() => {
     if (phase === 'practice' && !startedAt.current) startedAt.current = Date.now();
   }, [phase]);
+
+  useEffect(() => {
+    if (phase !== 'prep' || countdown == null) return undefined;
+    const timer = window.setTimeout(() => {
+      if (countdown <= 1) {
+        setCountdown(null);
+        setPhase('practice');
+        return;
+      }
+      setCountdown(countdown - 1);
+    }, 1000);
+    return () => window.clearTimeout(timer);
+  }, [countdown, phase]);
 
   const advance = () => {
     const index = stepRef.current;
@@ -602,7 +623,7 @@ function LessonScreen({ faculty, lesson, onBack, onFinish }) {
     bossPoseRef.current = next;
     setBossSerial(serial);
     setBossPose(next);
-    const windows = [1500, 1200, 1000, 800, 700];
+    const windows = [8000, 7500, 7000, 6500, 6000];
     const wait = windows[Math.min(bossPace.current, windows.length - 1)];
     bossPace.current += 1;
     window.clearTimeout(bossTimer.current);
@@ -736,6 +757,7 @@ function LessonScreen({ faculty, lesson, onBack, onFinish }) {
         holdStart = 0;
         lastGoodAt = 0;
         missLatch.current = false;
+        resetBalanceMotion();
       }
       const current = modeRef.current === 'boss'
         ? { pose: bossPoseRef.current }
@@ -750,12 +772,13 @@ function LessonScreen({ faculty, lesson, onBack, onFinish }) {
         return;
       }
 
-      const verdict = evaluatePose(points, current.pose);
+      const swaying = modeRef.current === 'balance' && trackBalanceMotion(points, timestamp);
+      const verdict = evaluatePose(points, current.pose, { swaying });
       drawPose(canvasRef.current, points, video, { error: !verdict.ok });
       if (verdict.ok) {
         if (!holdStart) holdStart = timestamp;
         lastGoodAt = timestamp;
-        const holdMs = modeRef.current === 'boss' ? 280 : HOLD_MS;
+        const holdMs = modeRef.current === 'balance' ? BALANCE_HOLD_MS : modeRef.current === 'boss' ? 900 : HOLD_MS;
         const ratio = Math.min(1, (timestamp - holdStart) / holdMs);
         if (timestamp - lastUi > 80) {
           lastUi = timestamp;
@@ -769,7 +792,7 @@ function LessonScreen({ faculty, lesson, onBack, onFinish }) {
         }
         return;
       }
-      if (timestamp - lastGoodAt > 180) holdStart = 0;
+      if (timestamp - lastGoodAt > (modeRef.current === 'balance' ? 260 : 180)) holdStart = 0;
       const wrongSide = /а нужна/.test(verdict.message || '');
       if (wrongSide && !missLatch.current && !busyRef.current && modeRef.current === 'boss') {
         missLatch.current = true;
@@ -810,6 +833,7 @@ function LessonScreen({ faculty, lesson, onBack, onFinish }) {
       landmarkerRef.current?.close?.();
       landmarkerRef.current = null;
       setPoseReady(false);
+      resetBalanceMotion();
     };
   }, [cameraOn]);
 
@@ -824,6 +848,8 @@ function LessonScreen({ faculty, lesson, onBack, onFinish }) {
       streamRef.current = stream;
       setCameraOn(true);
       setPoseFailed(false);
+      setCountdown(8);
+      speakRu('Встань удобно перед камерой', { force: true });
     } catch {
       setCameraOn(false);
       speakRu('Не получилось включить камеру. Позови взрослого помочь.', { force: true });
@@ -832,16 +858,15 @@ function LessonScreen({ faculty, lesson, onBack, onFinish }) {
   };
 
   const activePose = bossMode ? bossPose : step.pose;
-  const command = bossMode ? (bossPose === 'left-arm' ? 'Лево!' : 'Право!') : step.prompt;
+  const command = bossMode ? (bossPose === 'left-arm' ? 'Подними левую руку' : 'Подними правую руку') : step.prompt;
   const roundSteps = mode === 'sequence' ? steps.filter((item) => item.round === step.round) : [];
   const revealedSequenceStep = mode === 'sequence' && seqStage === 'memorize'
     ? roundSteps[Math.max(0, revealCount - 1)]
     : null;
   const demoPose = revealedSequenceStep?.pose || activePose;
   const indexInRound = Math.max(0, roundSteps.indexOf(step));
-  const prepTask = mode === 'sequence' ? 'Запомни порядок' : mode === 'boss' ? 'Лево или право' : steps[0].prompt;
   const taskTitle = mode === 'sequence'
-    ? (seqStage === 'memorize' ? 'Запомни порядок' : seqStage === 'mark' ? (seqGrade || 'Молодец') : 'Повтори')
+    ? (seqStage === 'mark' ? (seqGrade || 'Молодец') : seqStage === 'memorize' ? (revealedSequenceStep?.prompt || 'Смотри и запоминай порядок') : step.prompt)
     : command;
   const taskDetail = mode === 'sequence'
     ? (seqStage === 'memorize'
@@ -850,20 +875,29 @@ function LessonScreen({ faculty, lesson, onBack, onFinish }) {
         ? gentleNote(seqGrade || 'Молодец', seqClock)
         : `Движение ${indexInRound + 1} из ${roundSteps.length}. Время идёт спокойно.`)
     : step.detail;
+  const leadAndRest = (value) => {
+    const text = String(value || '').trim();
+    const match = text.match(/^(.+?[.!?])\s+([\s\S]+)$/);
+    if (!match) return { lead: text, rest: '' };
+    return { lead: match[1].trim(), rest: match[2].trim() };
+  };
+  const commandParts = lesson.id === 'balance-hard' ? { lead: taskTitle, rest: '' } : leadAndRest(taskTitle);
+  const commandRest = [commandParts.rest, taskDetail].filter(Boolean).join(' ');
   const manualAllowed = (!cameraOn || !activePose || poseFailed) && seqStage !== 'mark';
   const bar = bossMode
     ? Math.max(0, (bossLeft / 30000) * 100)
     : Math.max(8, ((stepIndex + (cameraOn && step.pose && !poseFailed && mode !== 'sequence' ? hold : 0)) / steps.length) * 100);
+  const balanceSeconds = Math.min(6, Math.floor(hold * 6));
   const spoken = phase === 'prep'
-    ? (bossMode ? 'Начинаем испытание! Повторяй за мной.' : prepTask)
+    ? ''
     : mode === 'sequence'
       ? (seqStage === 'mark' ? (seqGrade || 'Молодец') : '')
       : praising
         ? (bossMode ? '' : stepIndex + 1 < steps.length ? 'Отлично! А теперь следующее движение.' : '')
-        : (bossMode ? '' : step.prompt);
-  const levelWord = faculty.id === 'sides' ? 'УРОВЕНЬ' : 'УПРАЖНЕНИЕ';
+        : (bossMode ? (bossSerial > 0 ? command : '') : step.prompt);
+  const levelWord = faculty.id === 'sides' || faculty.id === 'balance' ? 'УРОВЕНЬ' : 'УПРАЖНЕНИЕ';
   const practiceLead = bossMode
-    ? 'Тридцать секунд. Повторяй сторону, которую видишь на экране.'
+    ? 'Тридцать секунд. Мово говорит, какую руку поднять, и ждёт, пока ты успеешь.'
     : mode === 'sequence'
       ? 'Сначала последовательность на экране, потом ты повторяешь её. Оценка по времени, без спешки.'
       : mode === 'intro'
@@ -883,7 +917,17 @@ function LessonScreen({ faculty, lesson, onBack, onFinish }) {
       return undefined;
     }
     const message = live.message;
-    const timer = window.setTimeout(() => setStableHint(message), 420);
+    const nag = /подними руку выше|ровнее/.test(message.toLowerCase());
+    if (nag && hintLocked()) return undefined;
+    let timer = 0;
+    const arm = () => {
+      if (!instructionSettled() || (nag && hintLocked())) {
+        timer = window.setTimeout(arm, 250);
+        return;
+      }
+      timer = window.setTimeout(() => setStableHint(message), nag ? 1600 : 700);
+    };
+    arm();
     return () => window.clearTimeout(timer);
   }, [live?.message, live?.ok, praising, phase, mode, seqStage]);
 
@@ -893,8 +937,9 @@ function LessonScreen({ faculty, lesson, onBack, onFinish }) {
   }, [phase, stepIndex, bossSerial]);
 
   useEffect(() => {
+    if (mode === 'balance') return;
     speakRu(spoken);
-  }, [spoken, phase, stepIndex, bossSerial, seqStage]);
+  }, [spoken, phase, stepIndex, bossSerial, seqStage, mode]);
 
   useEffect(() => {
     if (phase !== 'practice' || mode !== 'sequence' || seqStage !== 'memorize') return;
@@ -903,9 +948,9 @@ function LessonScreen({ faculty, lesson, onBack, onFinish }) {
   }, [phase, mode, seqStage, revealCount, step.round, steps]);
 
   useEffect(() => {
-    if (!showHint || !stableHint) return;
-    speakRu(stableHint);
-  }, [showHint, stableHint]);
+    if (mode === 'balance' || !showHint || !stableHint) return;
+    speakRu(stableHint, { hint: true, force: stableHint === BOTH_ARMS_HINT });
+  }, [showHint, stableHint, mode]);
 
   return (
     <section className="lesson-page">
@@ -939,6 +984,7 @@ function LessonScreen({ faculty, lesson, onBack, onFinish }) {
           )}
           <canvas ref={canvasRef} className="pose-canvas" />
           <div className="frame-guide" />
+          {phase === 'prep' && countdown != null && <div className="frame-countdown">{countdown}</div>}
           <div className="camera-label"><span className={cameraOn ? 'cam-live' : ''} />{cameraOn ? 'КАМЕРА ВКЛЮЧЕНА' : 'ПРЕДПРОСМОТР УРОКА'}</div>
           {showHint && <div className="screen-hint">{stableHint}</div>}
           {praising && phase === 'practice' && mode !== 'sequence' && <div className="screen-hint ok">Правильно!</div>}
@@ -954,9 +1000,9 @@ function LessonScreen({ faculty, lesson, onBack, onFinish }) {
           {phase === 'prep' ? (
             <>
               <div className="coach-bubble">
-                <span className="bubble-kicker">ЗАДАНИЕ</span>
-                <h2>{prepTask}</h2>
-                <p>{mode === 'sequence' ? 'Сначала Мово покажет порядок на несколько секунд. Потом ты повторишь его по памяти.' : mode === 'boss' ? 'На экране появится сторона. Повторяй её.' : steps[0].detail}</p>
+                <span className="bubble-kicker">СНАЧАЛА</span>
+                <h2>Встань перед камерой.</h2>
+                <p>Нажми кнопку и отойди в рамку. Команда появится, когда задание начнётся.</p>
               </div>
               <ul className="prep-list">
                 <li><Check size={16} /> Камера смотрит на тебя</li>
@@ -964,27 +1010,16 @@ function LessonScreen({ faculty, lesson, onBack, onFinish }) {
                 <li><Check size={16} /> Рядом есть место для рук</li>
               </ul>
               {!cameraOn && <button className="primary-button practice-button" onClick={startCamera}>Включить камеру и начать <ArrowRight size={19} /></button>}
-              {cameraOn && (
-                <>
-                  <p className={`camera-readiness${poseReady && live?.ok ? ' is-ready' : ''}`} role="status">
-                    {!poseReady ? 'Мово настраивает камеру…' : live?.ok ? 'Отлично, тебя видно целиком' : live?.message || 'Встань в рамку'}
-                  </p>
-                  <button
-                    className="primary-button practice-button"
-                    disabled={!poseReady || !live?.ok}
-                    onClick={() => setPhase('practice')}
-                  >
-                    {!poseReady ? 'Настраиваем камеру…' : live?.ok ? 'Начать упражнение' : 'Встань в рамку'} <ArrowRight size={19} />
-                  </button>
-                </>
+              {cameraOn && countdown != null && (
+                <p className="camera-readiness" role="status">Отойди и встань в рамку. Упражнение начнётся через {countdown}</p>
               )}
-              <button className="secondary-button" onClick={() => { stopCamera(); setPhase('practice'); }}>Пройти без камеры</button>
+              <button className="secondary-button" onClick={() => { stopCamera(); setCountdown(null); setPhase('practice'); }}>Пройти без камеры</button>
             </>
           ) : (
             <>
               <div className="coach-bubble">
                 <span className="bubble-kicker">{bossMode ? `ПРАВИЛЬНЫХ: ${bossScore}` : mode === 'sequence' && step.round ? `РАУНД ${step.round} ИЗ ${step.roundCount}` : `ДВИЖЕНИЕ ${stepIndex + 1} ИЗ ${steps.length}`}</span>
-                <h2>{taskTitle}</h2>
+                <h2 className="task-lead">{commandParts.lead}</h2>
                 {mode === 'sequence' && seqStage === 'memorize' && (
                   <div className="seq-board">
                     {roundSteps.map((item, index) => (
@@ -1001,7 +1036,8 @@ function LessonScreen({ faculty, lesson, onBack, onFinish }) {
                 )}
                 {praising && mode !== 'sequence' && <div className="praise-chip">Правильно!</div>}
                 {praising && mode === 'sequence' && <div className="praise-chip">Есть</div>}
-                <p>{taskDetail}</p>
+                {commandRest && <p>{commandRest}</p>}
+                {mode === 'balance' && <p className="balance-hold">Удержание: {balanceSeconds} из 6 секунд</p>}
               </div>
               <div className="practice-meta">
                 {bossMode ? (
@@ -1111,32 +1147,34 @@ function TasksScreen({ progress, onOpen }) {
   );
 }
 
-function RewardsScreen({ stars }) {
+function RewardsScreen({ progress }) {
+  const passed = (id) => {
+    const faculty = faculties.find((item) => item.id === id);
+    return Boolean(faculty) && faculty.lessons.every((lesson) => progress.completedLessonIds.includes(lesson.id));
+  };
   const badges = [
-    ['🌟', 'Первый шаг', 'Первый завершённый урок', stars > 0 ? 'earned' : 'locked'],
-    ['🔥', 'Серия 3', 'Три дня движения подряд', 'locked'],
-    ['🧭', 'Следопыт', 'Пройди пять уроков', 'locked'],
-    ['🏆', 'Герой факультета', 'Заверши испытание курса', 'locked'],
-    ['💫', 'Суперсерия', 'Семь дней занятий', 'locked'],
-    ['🎓', 'Выпускник', 'Открой следующий факультет', 'locked'],
+    { icon: '↔', title: 'Прошёл факультет сторон', text: 'Лево и право', state: passed('sides') ? 'earned' : 'ahead' },
+    { icon: '♧', title: 'Прошёл факультет равновесия', text: 'Самолёт, одна нога и сложный баланс', state: passed('balance') ? 'earned' : 'ahead' },
+    { icon: '⚡', title: 'Факультет реакции', text: 'Пока закрыт', state: 'sealed' },
+    { icon: '⌘', title: 'Факультет памяти', text: 'Пока закрыт', state: 'sealed' },
   ];
   return (
     <section className="content-page">
       <div className="eyebrow"><Award size={15} /> ТВОИ ДОСТИЖЕНИЯ</div>
       <h1>Зал наград</h1>
-      <p className="page-subtitle">Каждая награда напоминает, как далеко ты уже продвинулся.</p>
+      <p className="page-subtitle">Сначала факультет сторон, потом равновесие. Ещё два факультета пока закрыты.</p>
       <div className="reward-summary">
         <span className="summary-icon"><Star fill="currentColor" /></span>
-        <div><b>{stars} звёзд</b><small>{stars > 0 ? 'Ты уже собираешь созвездие.' : 'Первый урок зажжёт первую звезду.'}</small></div>
-        <div className="summary-progress"><span style={{ width: `${Math.min(100, stars)}%` }} /></div>
+        <div><b>{progress.stars} звёзд</b><small>{progress.stars > 0 ? 'Ты уже собираешь созвездие.' : 'Первый урок зажжёт первую звезду.'}</small></div>
+        <div className="summary-progress"><span style={{ width: `${Math.min(100, progress.stars)}%` }} /></div>
       </div>
-      <div className="badge-grid">
+      <div className="badge-grid faculty-badges">
         {badges.map((badge) => (
-          <article key={badge[1]} className={`badge-card ${badge[3]}`}>
-            <div>{badge[3] === 'earned' ? badge[0] : <LockKeyhole size={24} />}</div>
-            <b>{badge[1]}</b>
-            <small>{badge[2]}</small>
-            <span>{badge[3] === 'earned' ? 'ОТКРЫТО' : 'ВПЕРЕДИ'}</span>
+          <article key={badge.title} className={`badge-card ${badge.state === 'earned' ? 'earned' : 'locked'}`}>
+            <div>{badge.state === 'earned' ? badge.icon : <LockKeyhole size={24} />}</div>
+            <b>{badge.title}</b>
+            <small>{badge.text}</small>
+            <span>{badge.state === 'earned' ? 'ПРОЙДЕН' : badge.state === 'sealed' ? 'ЗАКРЫТО' : 'ВПЕРЕДИ'}</span>
           </article>
         ))}
       </div>

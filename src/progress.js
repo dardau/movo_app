@@ -52,6 +52,8 @@ export function saveProgress(progress) {
 
 export function isFacultyUnlocked(progress, index) {
   if (index <= 0) return true;
+  const faculty = faculties[index];
+  if (!faculty || faculty.sealed) return false;
   const previous = faculties[index - 1];
   if (!previous) return false;
   return previous.lessons.every((lesson) => progress.completedLessonIds.includes(lesson.id));
@@ -120,6 +122,10 @@ export function currentWork(progress) {
       ?? faculty.lessons[0];
     return { faculty, lesson };
   }
-  const last = faculties[faculties.length - 1];
-  return { faculty: last, lesson: last.lessons[0] };
+  for (let index = faculties.length - 1; index >= 0; index -= 1) {
+    if (facultyState(progress, index) === 'locked') continue;
+    const faculty = faculties[index];
+    return { faculty, lesson: faculty.lessons[faculty.lessons.length - 1] };
+  }
+  return { faculty: faculties[0], lesson: faculties[0].lessons[0] };
 }
