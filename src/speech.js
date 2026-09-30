@@ -4,6 +4,8 @@ let commandEndsAt = 0;
 let hintLockedUntil = 0;
 
 const RECORDINGS = [
+  [/^доброе утро.*разбудим наше тело/, '/audio/morning-greeting.mp3'],
+  [/^зарядка закончена.*заряд энергии/, '/audio/morning-complete.mp3'],
   [/^последовательность раунд 1$/, '/audio/sequence-round-1.mp3'],
   [/^последовательность раунд 2$/, '/audio/sequence-round-2.mp3'],
   [/^последовательность раунд 3$/, '/audio/sequence-round-3.mp3'],

@@ -3,12 +3,12 @@ import { createRoot } from 'react-dom/client';
 import { flushSync } from 'react-dom';
 import {
   ArrowLeft, ArrowRight, Award, Check, ChevronRight, CircleHelp, Clock3, Flame,
-  Footprints, LockKeyhole, Menu, Play, Shield, Sparkles, Star, Target, Trophy, X,
+  Footprints, LockKeyhole, Menu, Play, Shield, Sparkles, Star, Sun, Target, Trophy, X,
 } from 'lucide-react';
 import { faculties, STAR_REWARD } from './data/curriculum.js';
 import {
   completeLesson, currentWork, facultyState, lessonState, lessonsDone, loadProgress,
-  saveProgress, todayLessons,
+  saveProgress, todayLessons, todayStamp,
 } from './progress.js';
 import { BALANCE_HOLD_MS, BOTH_ARMS_HINT, createPoseLandmarker, drawPose, evaluatePose, frameStatus, HOLD_MS, resetBalanceMotion, trackBalanceMotion } from './pose.js';
 import { hintLocked, instructionSettled, resetSpeech, speakRu } from './speech.js';
@@ -58,12 +58,40 @@ const EXERCISE_VIDEOS = {
   'balance-left': '/videos/balance-left.mp4',
 };
 
+const MORNING_LESSON = {
+  id: `morning-${todayStamp()}`,
+  isMorning: true,
+  title: 'Утренняя зарядка',
+  sub: 'Разбудим тело за несколько минут',
+  icon: '☀',
+  minutes: '4 минуты',
+  mode: 'intro',
+  steps: [
+    { pose: 'both-arms', prompt: 'Подними обе руки', detail: 'Мягко потянись вверх.' },
+    { pose: 'left-arm', prompt: 'Подними левую руку', detail: 'Начинаем двигаться: левая рука выше плеча.' },
+    { pose: 'right-arm', prompt: 'Подними правую руку', detail: 'Теперь правая рука выше плеча.' },
+    { pose: 'airplane', prompt: 'Разведи руки в стороны', detail: 'Расправь руки, как крылья самолёта.' },
+    { pose: 'one-leg-right', prompt: 'Левую ногу подними', detail: 'Руки держи в стороны и постой на правой ноге.' },
+    { pose: 'right-arm', prompt: 'Подними правую руку', detail: 'Короткая серия: начинаем с правой.' },
+    { pose: 'left-arm', prompt: 'Подними левую руку', detail: 'Продолжай серию левой рукой.' },
+    { pose: 'both-arms', prompt: 'Подними обе руки', detail: 'Заверши серию двумя поднятыми руками.' },
+  ],
+};
+
+const MORNING_FACULTY = {
+  id: 'morning',
+  title: 'Доброе утро',
+  course: 'Утренняя зарядка',
+  symbol: '☀',
+  lessons: [MORNING_LESSON],
+};
+
 function ExerciseVideo({ src, pose, playbackKey }) {
   return (
     <div className="exercise-video-wrap" aria-label="Демонстрация движения от Мово">
       <video
         key={`${src}-${playbackKey}`}
-        className={`exercise-video${pose === 'left-arm' ? ' is-mirrored' : ''}`}
+        className={`exercise-video${pose === 'right-arm' ? ' show-on-right' : ''}`}
         src={src}
         autoPlay
         muted
@@ -80,12 +108,15 @@ function App() {
   const [activeTab, setActiveTab] = useState('Факультеты');
   const [facultyId, setFacultyId] = useState(faculties[0].id);
   const [lessonId, setLessonId] = useState(null);
+  const [morningActive, setMorningActive] = useState(false);
   const [mobileNav, setMobileNav] = useState(false);
   const [result, setResult] = useState(null);
   const mainRef = useRef(null);
 
-  const faculty = faculties.find((item) => item.id === facultyId) ?? faculties[0];
-  const lesson = faculty.lessons.find((item) => item.id === lessonId) ?? null;
+  const regularFaculty = faculties.find((item) => item.id === facultyId) ?? faculties[0];
+  const regularLesson = regularFaculty.lessons.find((item) => item.id === lessonId) ?? null;
+  const faculty = morningActive ? MORNING_FACULTY : regularFaculty;
+  const lesson = morningActive ? MORNING_LESSON : regularLesson;
   const work = currentWork(progress);
   const doneToday = todayLessons(progress);
 
@@ -102,6 +133,7 @@ function App() {
 
   const go = (tab) => {
     showScreen(() => {
+      setMorningActive(false);
       setActiveTab(tab);
       setMobileNav(false);
       if (tab === 'Путь') {
@@ -118,6 +150,7 @@ function App() {
     const index = faculties.findIndex((item) => item.id === nextFaculty.id);
     if (facultyState(progress, index) === 'locked') return;
     showScreen(() => {
+      setMorningActive(false);
       setFacultyId(nextFaculty.id);
       setActiveTab('Путь');
       setScreen('path');
@@ -129,9 +162,19 @@ function App() {
     const lessonIndex = nextFaculty.lessons.findIndex((item) => item.id === nextLesson.id);
     if (lessonState(progress, nextFaculty, lessonIndex) === 'locked' || facultyState(progress, facultyIndex) === 'locked') return;
     showScreen(() => {
+      setMorningActive(false);
       setFacultyId(nextFaculty.id);
       setLessonId(nextLesson.id);
       setActiveTab('Путь');
+      setScreen('lesson');
+    });
+  };
+
+  const openMorning = () => {
+    showScreen(() => {
+      setMorningActive(true);
+      setLessonId(null);
+      setActiveTab('Факультеты');
       setScreen('lesson');
     });
   };
@@ -151,6 +194,7 @@ function App() {
         boss: Boolean(stats.boss),
         correct: stats.correct ?? stats.moves,
         grades: Array.isArray(stats.grades) ? stats.grades : null,
+        morning: Boolean(lesson.isMorning),
       });
       setScreen('result');
     });
@@ -186,7 +230,7 @@ function App() {
           </div>
         </aside>
         <main className="main-area" ref={mainRef}>
-          {screen === 'faculties' && <FacultiesScreen progress={progress} onOpen={openFaculty} />}
+          {screen === 'faculties' && <FacultiesScreen progress={progress} onOpen={openFaculty} onMorning={openMorning} />}
           {screen === 'path' && (
             <PathScreen
               faculty={faculty}
@@ -201,14 +245,33 @@ function App() {
               key={lesson.id}
               faculty={faculty}
               lesson={lesson}
-              onBack={() => showScreen(() => { setScreen('path'); setActiveTab('Путь'); })}
+              onBack={() => showScreen(() => {
+                if (morningActive) {
+                  setMorningActive(false);
+                  setScreen('faculties');
+                  setActiveTab('Факультеты');
+                } else {
+                  setScreen('path');
+                  setActiveTab('Путь');
+                }
+              })}
               onFinish={finishLesson}
             />
           )}
           {screen === 'result' && result && (
             <ResultScreen
               result={result}
-              onContinue={() => showScreen(() => { setFacultyId(result.faculty.id); setScreen('path'); setActiveTab('Путь'); })}
+              onContinue={() => showScreen(() => {
+                if (result.morning) {
+                  setMorningActive(false);
+                  setScreen('faculties');
+                  setActiveTab('Факультеты');
+                } else {
+                  setFacultyId(result.faculty.id);
+                  setScreen('path');
+                  setActiveTab('Путь');
+                }
+              })}
             />
           )}
           {screen === 'rewards' && <RewardsScreen progress={progress} />}
@@ -236,12 +299,24 @@ function NavItem({ label, active, onClick, icon }) {
   );
 }
 
-function FacultiesScreen({ progress, onOpen }) {
+function FacultiesScreen({ progress, onOpen, onMorning }) {
+  const morningDone = progress.completedLessonIds.includes(MORNING_LESSON.id);
   return (
     <section className="content-page">
       <div className="eyebrow"><Sparkles size={15} /> МИР MOVO</div>
       <h1>Факультеты академии</h1>
       <p className="page-subtitle">Сначала факультет сторон, потом равновесие. Реакция и память пока закрыты.</p>
+      <article className={`morning-card${morningDone ? ' is-done' : ''}`}>
+        <div className="morning-icon"><Sun size={31} /></div>
+        <div className="morning-copy">
+          <span>{morningDone ? 'ЗАРЯДКА НА СЕГОДНЯ ГОТОВА' : 'ЕЖЕДНЕВНОЕ ЗАДАНИЕ'}</span>
+          <h2>Утренняя зарядка</h2>
+          <p>{morningDone ? 'Ты уже зарядился энергией. Можно повторить ещё раз!' : '8 движений · около 4 минут · +20 звёзд'}</p>
+        </div>
+        <button className="morning-button" onClick={onMorning}>
+          <Play size={18} fill="currentColor" /> {morningDone ? 'Повторить' : 'Начать зарядку'}
+        </button>
+      </article>
       <div className="faculty-grid">
         {faculties.map((item, index) => {
           const state = facultyState(progress, index);
@@ -888,7 +963,9 @@ function LessonScreen({ faculty, lesson, onBack, onFinish }) {
     : Math.max(8, ((stepIndex + (cameraOn && step.pose && !poseFailed && mode !== 'sequence' ? hold : 0)) / steps.length) * 100);
   const balanceSeconds = Math.min(6, Math.floor(hold * 6));
   const spoken = phase === 'prep'
-    ? (mode === 'balance' ? 'Начинаем урок равновесия. Встань удобно и смотри на Мово.' : '')
+    ? (lesson.isMorning
+      ? 'Доброе утро! Давай разбудим наше тело и зарядимся энергией.'
+      : mode === 'balance' ? 'Начинаем урок равновесия. Встань удобно и смотри на Мово.' : '')
     : mode === 'sequence'
       ? (seqStage === 'mark' ? (seqGrade || 'Молодец') : '')
       : praising
@@ -897,6 +974,8 @@ function LessonScreen({ faculty, lesson, onBack, onFinish }) {
   const levelWord = faculty.id === 'sides' || faculty.id === 'balance' ? 'УРОВЕНЬ' : 'УПРАЖНЕНИЕ';
   const practiceLead = bossMode
     ? 'Тридцать секунд. Мово говорит, какую руку поднять, и ждёт, пока ты успеешь.'
+    : lesson.isMorning
+      ? 'Повторяй за Мово. Двигайся спокойно и в удобном темпе.'
     : mode === 'sequence'
       ? 'Сначала последовательность на экране, потом ты повторяешь её. Оценка по времени, без спешки.'
       : mode === 'intro'
@@ -951,10 +1030,10 @@ function LessonScreen({ faculty, lesson, onBack, onFinish }) {
 
   return (
     <section className="lesson-page">
-      <button className="back-link" onClick={() => { stopCamera(); onBack(); }}><ArrowLeft size={17} /> Вернуться на дорожку</button>
+      <button className="back-link" onClick={() => { stopCamera(); onBack(); }}><ArrowLeft size={17} /> {lesson.isMorning ? 'Вернуться на главную' : 'Вернуться на дорожку'}</button>
       <div className="lesson-topline">
         <span className="eyebrow"><Sparkles size={15} /> {faculty.title.toUpperCase()}</span>
-        <span className="lesson-number">{levelWord} {lessonIndex + 1} ИЗ {faculty.lessons.length}</span>
+        <span className="lesson-number">{lesson.isMorning ? 'ЗАРЯДКА НА СЕГОДНЯ' : `${levelWord} ${lessonIndex + 1} ИЗ ${faculty.lessons.length}`}</span>
       </div>
       <div className="lesson-title-row">
         <div>
@@ -1076,17 +1155,19 @@ function LessonScreen({ faculty, lesson, onBack, onFinish }) {
 
 function ResultScreen({ result, onContinue }) {
   useEffect(() => {
-    speakRu('Урок пройден! Ты отлично справился.', { force: true });
+    speakRu(result.morning
+      ? 'Зарядка закончена! Ты получил заряд энергии на весь день.'
+      : 'Урок пройден! Ты отлично справился.', { force: true });
     return () => resetSpeech();
-  }, []);
+  }, [result.morning]);
 
   return (
     <section className="result-page">
       <div className="result-confetti">✦</div>
       <div className="result-trophy"><Trophy size={52} /></div>
-      <span className="eyebrow"><Sparkles size={15} /> {result.boss ? 'БОСС' : 'ОТЛИЧНАЯ РАБОТА!'}</span>
-      <h1>{result.boss ? 'Босс побеждён!' : 'Ты прошёл урок!'}</h1>
-      <p className="page-subtitle">{result.boss ? `Правильных движений: ${result.correct}` : result.grades?.length ? `Оценки: ${result.grades.join(', ')}.` : `Урок «${result.lesson.title}» засчитан. Мово гордится тобой.`}</p>
+      <span className="eyebrow"><Sparkles size={15} /> {result.morning ? 'ДОБРОЕ УТРО!' : result.boss ? 'БОСС' : 'ОТЛИЧНАЯ РАБОТА!'}</span>
+      <h1>{result.morning ? 'Зарядка закончена!' : result.boss ? 'Босс побеждён!' : 'Ты прошёл урок!'}</h1>
+      <p className="page-subtitle">{result.morning ? 'Ты разбудил тело и получил заряд энергии на весь день.' : result.boss ? `Правильных движений: ${result.correct}` : result.grades?.length ? `Оценки: ${result.grades.join(', ')}.` : `Урок «${result.lesson.title}» засчитан. Мово гордится тобой.`}</p>
       <div className="result-stats">
         <div><span className="stat-icon green"><Target /></span><b>{result.boss ? result.correct : `${result.moves} / ${result.moves}`}</b><small>{result.boss ? 'правильных' : 'движения'}</small></div>
         <div><span className="stat-icon yellow"><Star /></span><b>{result.stars > 0 ? `+${result.stars}` : '0'}</b><small>{result.stars > 0 ? 'звёзд' : 'уже было'}</small></div>
@@ -1096,7 +1177,7 @@ function ResultScreen({ result, onContinue }) {
         <img src="/assets/logo.png" alt="" />
         <p>«У тебя здорово получается! Готов к следующему приключению?»<b>— Мово</b></p>
       </div>
-      <button className="primary-button result-button" onClick={onContinue}>Вернуться на дорожку <ArrowRight size={17} /></button>
+      <button className="primary-button result-button" onClick={onContinue}>{result.morning ? 'На главную' : 'Вернуться на дорожку'} <ArrowRight size={17} /></button>
     </section>
   );
 }
