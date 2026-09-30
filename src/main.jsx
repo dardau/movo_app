@@ -51,12 +51,11 @@ const EXERCISE_VIDEOS = {
   'both-arms': '/videos/both-hands.mp4',
   success: '/videos/celebrate.mp4',
   retry: '/videos/try-again.mp4',
-  // Место для анимаций факультета равновесия. Напарник подставит ролики.
-  airplane: null,
-  'one-leg-right': null,
-  'one-leg-left': null,
-  'balance-right': null,
-  'balance-left': null,
+  airplane: '/videos/airplane.mp4',
+  'one-leg-right': '/videos/one-leg-right.mp4',
+  'one-leg-left': '/videos/one-leg-left.mp4',
+  'balance-right': '/videos/balance-right.mp4',
+  'balance-left': '/videos/balance-left.mp4',
 };
 
 function ExerciseVideo({ src, pose, playbackKey }) {
@@ -889,7 +888,7 @@ function LessonScreen({ faculty, lesson, onBack, onFinish }) {
     : Math.max(8, ((stepIndex + (cameraOn && step.pose && !poseFailed && mode !== 'sequence' ? hold : 0)) / steps.length) * 100);
   const balanceSeconds = Math.min(6, Math.floor(hold * 6));
   const spoken = phase === 'prep'
-    ? ''
+    ? (mode === 'balance' ? 'Начинаем урок равновесия. Встань удобно и смотри на Мово.' : '')
     : mode === 'sequence'
       ? (seqStage === 'mark' ? (seqGrade || 'Молодец') : '')
       : praising
@@ -937,18 +936,16 @@ function LessonScreen({ faculty, lesson, onBack, onFinish }) {
   }, [phase, stepIndex, bossSerial]);
 
   useEffect(() => {
-    if (mode === 'balance') return;
     speakRu(spoken);
   }, [spoken, phase, stepIndex, bossSerial, seqStage, mode]);
 
   useEffect(() => {
     if (phase !== 'practice' || mode !== 'sequence' || seqStage !== 'memorize') return;
-    const item = steps.filter((entry) => entry.round === step.round)[revealCount - 1];
-    if (item) speakRu(item.prompt);
+    if (revealCount === 1) speakRu(`Последовательность раунд ${step.round}`, { force: true });
   }, [phase, mode, seqStage, revealCount, step.round, steps]);
 
   useEffect(() => {
-    if (mode === 'balance' || !showHint || !stableHint) return;
+    if (!showHint || !stableHint) return;
     speakRu(stableHint, { hint: true, force: stableHint === BOTH_ARMS_HINT });
   }, [showHint, stableHint, mode]);
 
